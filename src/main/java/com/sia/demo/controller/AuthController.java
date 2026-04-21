@@ -10,6 +10,7 @@ import com.sia.demo.security.JwtService;
 import jakarta.validation.Valid;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -55,9 +56,13 @@ public class AuthController {
 
     @PostMapping("/login")
     public AuthResponse login(@Valid @RequestBody AuthLoginRequest request) {
-        authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(request.email().toLowerCase(), request.password())
-        );
+        try {
+            authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(request.email().toLowerCase(), request.password())
+            );
+        } catch (AuthenticationException ex) {
+            throw new ResponseStatusException(BAD_REQUEST, "Invalid credentials");
+        }
         User user = userRepository.findByEmail(request.email().toLowerCase())
                 .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST, "Invalid credentials"));
         String token = jwtService.generateToken(user);

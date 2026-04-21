@@ -28,7 +28,7 @@ public class User {
     @Column(nullable = false, unique = true)
     private String email;
 
-    @Column(nullable = false)
+    @Column(nullable = true)
     private String password;
 
     @Enumerated(EnumType.STRING)
@@ -38,8 +38,19 @@ public class User {
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
+    // OAuth2 Fields
+    @Column(nullable = true)
+    private String provider; // "github", "email", etc.
+
+    @Column(nullable = true)
+    private String providerId; // GitHub user ID or other provider ID
+
+    @Column(nullable = true)
+    private String avatarUrl; // Profile picture URL from provider
+
     @PrePersist
     void onCreate() {
         this.createdAt = Instant.now();
     }
 }
+
