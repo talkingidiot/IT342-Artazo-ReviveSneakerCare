@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { authAPI } from "./api";
+import { authAPI, adminAPI } from "./api";
 
 const NAV_LINKS = ["HOME", "SERVICES", "BRANCHES", "ABOUT US", "CONTACT US"];
 
@@ -1615,6 +1615,165 @@ function Dashboard({ user, onLogout, cart, onAddToCart, onRemoveFromCart, showCa
   );
 }
 
+function AdminDashboard({ user, onLogout }) {
+  const [view, setView] = useState("orders");
+  const [orders, setOrders] = useState([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [ordersError, setOrdersError] = useState("");
+  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [salesData, setSalesData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const loadOrders = async () => {
+      setOrdersLoading(true);
+      setOrdersError("");
+      try {
+        const data = await adminAPI.getOrders();
+        setOrders(Array.isArray(data) ? data : []);
+      } catch (err) {
+        setOrdersError(err.message || "Failed to load orders");
+      } finally {
+        setOrdersLoading(false);
+      }
+    };
+
+    loadOrders();
+  }, []);
+
+  useEffect(() => {
+    const loadSales = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const data = await adminAPI.getMonthlySales(month);
+        setSalesData(data);
+      } catch (err) {
+        setError(err.message || "Failed to load monthly sales");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadSales();
+  }, [month]);
+
+  const totalSales = Number(salesData?.totalSales ?? 0);
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#f8f5f1", padding: "40px 20px" }}>
+      <div style={{ maxWidth: "900px", margin: "0 auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px", gap: "12px", flexWrap: "wrap" }}>
+          <h1 style={{ margin: 0, color: "#3a2e1e", fontFamily: "'Cormorant Garamond', Georgia, serif" }}>Admin Sales Dashboard</h1>
+          <button
+            onClick={onLogout}
+            style={{
+              background: "#8B7355", color: "#fff", border: "none", borderRadius: "20px",
+              padding: "10px 18px", cursor: "pointer", fontWeight: 700, letterSpacing: "1px",
+              fontFamily: "'Cormorant Garamond', Georgia, serif",
+            }}
+          >
+            LOG OUT
+          </button>
+        </div>
+
+        <p style={{ marginTop: 0, color: "#6b5a3e", fontFamily: "'Cormorant Garamond', Georgia, serif" }}>
+          Welcome, {user?.name || "Admin"}.
+        </p>
+
+        <div style={{ display: "flex", gap: "10px", marginBottom: "14px" }}>
+          <button
+            onClick={() => setView("orders")}
+            style={{
+              background: view === "orders" ? "#8B7355" : "#efe8df",
+              color: view === "orders" ? "#fff" : "#3a2e1e",
+              border: "none",
+              borderRadius: "18px",
+              padding: "9px 16px",
+              cursor: "pointer",
+              fontWeight: 700,
+            }}
+          >
+            ORDERS
+          </button>
+          <button
+            onClick={() => setView("sales")}
+            style={{
+              background: view === "sales" ? "#8B7355" : "#efe8df",
+              color: view === "sales" ? "#fff" : "#3a2e1e",
+              border: "none",
+              borderRadius: "18px",
+              padding: "9px 16px",
+              cursor: "pointer",
+              fontWeight: 700,
+            }}
+          >
+            MONTHLY SALES
+          </button>
+        </div>
+
+        <div style={{ background: "#fff", borderRadius: "14px", padding: "22px", boxShadow: "0 10px 30px rgba(0,0,0,0.08)" }}>
+          {view === "orders" && (
+            <div>
+              {ordersLoading && <p style={{ color: "#8B7355" }}>Loading orders...</p>}
+              {ordersError && <p style={{ color: "#c43d2f" }}>{ordersError}</p>}
+              {!ordersLoading && !ordersError && (
+                <div style={{ display: "grid", gap: "10px" }}>
+                  {orders.length === 0 && <p style={{ margin: 0, color: "#6b5a3e" }}>No orders found.</p>}
+                  {orders.map((order) => (
+                    <div key={order.id} style={{ border: "1px solid #eee1d3", borderRadius: "10px", padding: "12px 14px" }}>
+                      <p style={{ margin: "0 0 4px", color: "#3a2e1e", fontWeight: 700 }}>Order #{order.id}</p>
+                      <p style={{ margin: "0 0 4px", color: "#6b5a3e" }}>
+                        {order.clientName} • {order.serviceType || "No service yet"}
+                      </p>
+                      <p style={{ margin: 0, color: "#7a6a56" }}>
+                        Status: {order.status} • Price: {order.quotedPrice ? `₱${Number(order.quotedPrice).toLocaleString()}` : "Not quoted"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {view === "sales" && (
+            <div>
+              <label style={{ display: "block", marginBottom: "10px", color: "#3a2e1e", fontWeight: 700, fontFamily: "'Cormorant Garamond', Georgia, serif" }}>
+                Select Month
+              </label>
+              <input
+                type="month"
+                value={month}
+                onChange={(e) => setMonth(e.target.value)}
+                style={{ padding: "10px", borderRadius: "8px", border: "1px solid #d9d1c7", marginBottom: "20px" }}
+              />
+
+              {loading && <p style={{ color: "#8B7355" }}>Loading sales...</p>}
+              {error && <p style={{ color: "#c43d2f" }}>{error}</p>}
+
+              {!loading && !error && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px" }}>
+                  <div style={{ background: "#f9f4ee", borderRadius: "10px", padding: "18px" }}>
+                    <p style={{ margin: "0 0 6px", color: "#6b5a3e", fontSize: "13px", letterSpacing: "1px" }}>TOTAL SALES</p>
+                    <p style={{ margin: 0, color: "#3a2e1e", fontSize: "30px", fontWeight: 700 }}>
+                      ₱{totalSales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                  <div style={{ background: "#f9f4ee", borderRadius: "10px", padding: "18px" }}>
+                    <p style={{ margin: "0 0 6px", color: "#6b5a3e", fontSize: "13px", letterSpacing: "1px" }}>COMPLETED SERVICES</p>
+                    <p style={{ margin: 0, color: "#3a2e1e", fontSize: "30px", fontWeight: 700 }}>{salesData?.completedOrders ?? 0}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [cart, setCart] = useState([]);
   const [showCart, setShowCart] = useState(false);
@@ -1652,6 +1811,10 @@ export default function App() {
 
   // If logged in, show dashboard instead
   if (isLoggedIn) {
+    if (user?.role === "ADMIN") {
+      return <AdminDashboard user={user} onLogout={handleLogout} />;
+    }
+
     return (
       <Dashboard 
         user={user} 

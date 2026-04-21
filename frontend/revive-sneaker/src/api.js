@@ -121,3 +121,50 @@ export const authAPI = {
     }
   }
 };
+
+export const adminAPI = {
+  getOrders: async () => {
+    const token = authAPI.getAuthToken();
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    const response = await fetch(`${API_BASE_URL}/admin/orders`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.message || `Failed to load orders: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  getMonthlySales: async (month) => {
+    const token = authAPI.getAuthToken();
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    const params = new URLSearchParams();
+    if (month) {
+      params.set('month', month);
+    }
+
+    const response = await fetch(`${API_BASE_URL}/admin/orders/sales/monthly?${params.toString()}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.message || `Failed to load monthly sales: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+};

@@ -1,5 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { OAuth2Callback } from "./OAuth2Callback";
+import { GitHubLoginButton } from "./GitHubLoginButton";
 
 const NAV_LINKS = ["HOME", "SERVICES", "BRANCHES", "ABOUT US", "CONTACT US"];
 
@@ -10,6 +13,38 @@ const SECTION_IDS = {
   "ABOUT US": "section-about",
   "CONTACT US": "section-contact",
 };
+
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080/api").replace(/\/$/, "");
+const AUTH_TOKEN_KEY = "sia_auth_token";
+const AUTH_USER_KEY = "sia_auth_user";
+const CLIENT_NOTIFICATION_SEEN_AT_KEY = "sia_client_notification_seen_at";
+
+async function apiRequest(path, { method = "GET", body, token } = {}) {
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await response.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { message: text };
+    }
+  }
+  if (!response.ok) {
+    const validationMessage =
+      Array.isArray(data?.errors) && data.errors.length > 0
+        ? data.errors.map((e) => e.defaultMessage || e.message).filter(Boolean).join(", ")
+        : null;
+    throw new Error(validationMessage || data?.message || "Request failed");
+  }
+  return data;
+}
 
 function CartSidebar({ cart, onClose, onRemove }) {
   const total = cart.reduce((sum, item) => sum + (item.basePrice || 0), 0);
@@ -127,8 +162,475 @@ function LoginModal({ onClose }) {
   );
 }
 
-function Navbar({ cartCount, onCartOpen, onLoginOpen }) {
+function AuthModal({ onClose, onAuthSuccess }) {
+  const [isRegister, setIsRegister] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const inputStyle = {
+    width: "100%", padding: "12px 14px", border: "1.5px solid #e0dbd4",
+    borderRadius: "8px", fontSize: "14px", fontFamily: "'Cormorant Garamond', Georgia, serif",
+    color: "#3a2e1e", background: "#fff", outline: "none", boxSizing: "border-box",
+  };
+
+  const handleSubmit = async () => {
+    const name = form.name.trim();
+    const email = form.email.trim();
+    const password = form.password;
+    if (isRegister && !name) {
+      setError("Full name is required.");
+      return;
+    }
+    if (!email) {
+      setError("Email is required.");
+      return;
+    }
+    if (!password) {
+      setError("Password is required.");
+      return;
+    }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    try {
+      const data = isRegister
+        ? await apiRequest("/auth/register", { method: "POST", body: { name, email, password } })
+        : await apiRequest("/auth/login", {
+            method: "POST",
+            body: { email, password },
+          });
+      onAuthSuccess({
+        token: data.token,
+        user: { name: data.name, email: data.email, role: data.role },
+      });
+      onClose();
+    } catch (err) {
+      setError(err.message || "Authentication failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return createPortal(
+    <div style={{ position: "fixed", inset: 0, zIndex: 999, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#fff", borderRadius: "18px", width: "100%", maxWidth: "440px", boxShadow: "0 24px 80px rgba(0,0,0,0.22)" }}>
+        <div style={{ padding: "32px 36px 24px", borderBottom: "1px solid #f0ebe4", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <h2 style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "30px", fontWeight: 700, color: "#3a2e1e", margin: 0 }}>
+            {isRegister ? "Create your account" : "Welcome back"}
+          </h2>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "20px", color: "#999" }}>X</button>
+        </div>
+        <div style={{ padding: "28px 36px 36px", display: "flex", flexDirection: "column", gap: "18px" }}>
+          {isRegister && (
+            <div>
+              <label style={{ display: "block", fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "13px", fontWeight: 700, letterSpacing: "1px", color: "#6b5a3e", marginBottom: "7px", textTransform: "uppercase" }}>Full name</label>
+              <input type="text" placeholder="Juan Dela Cruz" value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })} style={inputStyle} />
+            </div>
+          )}
+          <div>
+            <label style={{ display: "block", fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "13px", fontWeight: 700, letterSpacing: "1px", color: "#6b5a3e", marginBottom: "7px", textTransform: "uppercase" }}>Email address</label>
+            <input type="email" placeholder="your.email@example.com" value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })} style={inputStyle} />
+          </div>
+          <div>
+            <label style={{ display: "block", fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "13px", fontWeight: 700, letterSpacing: "1px", color: "#6b5a3e", marginBottom: "7px", textTransform: "uppercase" }}>Password</label>
+            <input type="password" placeholder="At least 8 characters" value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })} style={inputStyle} />
+          </div>
+          <button onClick={handleSubmit} disabled={loading} style={{
+            background: "#8B7355", color: "#fff", border: "none", borderRadius: "8px",
+            padding: "14px", fontSize: "12px", fontWeight: 700, letterSpacing: "2px",
+            cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Cormorant Garamond', Georgia, serif", marginTop: "4px",
+            opacity: loading ? 0.7 : 1,
+          }}>
+            {loading ? "Please wait..." : isRegister ? "Create account" : "Log in"}
+          </button>
+          <GitHubLoginButton />
+          {error && <p style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "13px", color: "#c0392b", margin: 0 }}>{error}</p>}
+          <p style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "13px", color: "#999", textAlign: "center", margin: 0 }}>
+            {isRegister ? "Already have an account?" : "Don't have an account yet?"}{" "}
+            <span style={{ color: "#8B7355", cursor: "pointer", fontWeight: 700 }} onClick={() => setIsRegister((prev) => !prev)}>
+              {isRegister ? "Log in here" : "Create one"}
+            </span>
+          </p>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function AdminOrdersModal({ onClose, token, initialView = "orders" }) {
+  const [view, setView] = useState(initialView);
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const [quoteForm, setQuoteForm] = useState({
+    serviceType: "Deep Cleaning",
+    quotedPrice: "",
+    estimatedCompletionDate: "",
+    claimWindow: "5 - 7 days",
+  });
+  const [noteLoading, setNoteLoading] = useState(false);
+  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [salesLoading, setSalesLoading] = useState(true);
+  const [salesError, setSalesError] = useState("");
+  const [monthlySales, setMonthlySales] = useState(null);
+
+  const selectedOrder = orders.find((o) => o.id === selectedOrderId) || null;
+
+  const loadOrders = async () => {
+    try {
+      const data = await apiRequest("/admin/orders", { token });
+      const list = Array.isArray(data) ? data : [];
+      setOrders(list);
+      if (!selectedOrderId && list.length > 0) {
+        setSelectedOrderId(list[0].id);
+      }
+    } catch (err) {
+      setError(err.message || "Failed to load admin orders");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadOrders();
+  }, [token]);
+
+  useEffect(() => {
+    const loadMonthlySales = async () => {
+      setSalesLoading(true);
+      setSalesError("");
+      try {
+        const data = await apiRequest(`/admin/orders/sales/monthly?month=${month}`, { token });
+        setMonthlySales(data || null);
+      } catch (err) {
+        setSalesError(err.message || "Failed to load monthly sales");
+      } finally {
+        setSalesLoading(false);
+      }
+    };
+    loadMonthlySales();
+  }, [token, month]);
+
+  useEffect(() => {
+    if (!selectedOrder) return;
+    setQuoteForm({
+      serviceType: selectedOrder.serviceType || "Deep Cleaning",
+      quotedPrice: selectedOrder.quotedPrice ?? "",
+      estimatedCompletionDate: selectedOrder.estimatedCompletionDate || "",
+      claimWindow: "5 - 7 days",
+    });
+  }, [selectedOrderId]);
+
+  const saveQuoteAndNotify = async () => {
+    if (!selectedOrder) return;
+    const shouldUpdateQuote = selectedOrder.status === "WAITING_FOR_QUOTE";
+    if (
+      shouldUpdateQuote &&
+      (!quoteForm.serviceType || quoteForm.quotedPrice === "" || !quoteForm.estimatedCompletionDate)
+    ) {
+      setError("Service type, total payment, and estimated completion date are required.");
+      return;
+    }
+    setNoteLoading(true);
+    setError("");
+    try {
+      if (shouldUpdateQuote) {
+        await apiRequest(`/admin/orders/${selectedOrder.id}/quote`, {
+          method: "PATCH",
+          token,
+          body: {
+            serviceType: quoteForm.serviceType,
+            quotedPrice: Number(quoteForm.quotedPrice),
+            estimatedCompletionDate: quoteForm.estimatedCompletionDate,
+          },
+        });
+      }
+      const note = `Hi! Recommended service: ${quoteForm.serviceType}. Total payment: ${quoteForm.quotedPrice}. Estimated completion date: ${quoteForm.estimatedCompletionDate}. Claim in ${quoteForm.claimWindow}.`;
+      await apiRequest(`/orders/${selectedOrder.id}/messages`, {
+        method: "POST",
+        token,
+        body: { message: note },
+      });
+      await loadOrders();
+    } catch (err) {
+      setError(err.message || "Failed to save quote and notify client");
+    } finally {
+      setNoteLoading(false);
+    }
+  };
+
+  const markOrderOngoingCleaning = async () => {
+    if (!selectedOrder || selectedOrder.status !== "QUOTED") {
+      return;
+    }
+    setNoteLoading(true);
+    setError("");
+    try {
+      await apiRequest(`/admin/orders/${selectedOrder.id}/status`, {
+        method: "PATCH",
+        token,
+        body: { status: "ONGOING_CLEANING" },
+      });
+      await apiRequest(`/orders/${selectedOrder.id}/messages`, {
+        method: "POST",
+        token,
+        body: { message: "Your shoes are now under cleaning process." },
+      });
+      await loadOrders();
+    } catch (err) {
+      setError(err.message || "Failed to update order status to ongoing cleaning");
+    } finally {
+      setNoteLoading(false);
+    }
+  };
+
+  const markOrderReadyToClaim = async () => {
+    if (!selectedOrder || selectedOrder.status !== "ONGOING_CLEANING") {
+      return;
+    }
+    setNoteLoading(true);
+    setError("");
+    try {
+      await apiRequest(`/admin/orders/${selectedOrder.id}/status`, {
+        method: "PATCH",
+        token,
+        body: { status: "READY_FOR_PICKUP" },
+      });
+      await apiRequest(`/orders/${selectedOrder.id}/messages`, {
+        method: "POST",
+        token,
+        body: { message: "Your shoes are done and ready to be claimed." },
+      });
+      await loadOrders();
+    } catch (err) {
+      setError(err.message || "Failed to mark order as ready to claim");
+    } finally {
+      setNoteLoading(false);
+    }
+  };
+
+  return createPortal(
+    <div style={{ position: "fixed", inset: 0, zIndex: 999, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#fff", borderRadius: "18px", width: "100%", maxWidth: "920px", maxHeight: "88vh", overflow: "auto", boxShadow: "0 24px 80px rgba(0,0,0,0.22)" }}>
+        <div style={{ padding: "24px 28px", borderBottom: "1px solid #f0ebe4", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <h2 style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "28px", fontWeight: 700, color: "#3a2e1e", margin: 0 }}>
+            {view === "orders" ? "Admin Orders" : "Monthly Sales"}
+          </h2>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "20px", color: "#999" }}>X</button>
+        </div>
+        <div style={{ padding: "20px 28px 28px" }}>
+          <div style={{ display: "flex", gap: "10px", marginBottom: "14px" }}>
+            <button
+              onClick={() => setView("orders")}
+              style={{
+                background: view === "orders" ? "#8B7355" : "#efe8df",
+                color: view === "orders" ? "#fff" : "#3a2e1e",
+                border: "none",
+                borderRadius: "18px",
+                padding: "8px 14px",
+                cursor: "pointer",
+                fontWeight: 700,
+                fontFamily: "'Cormorant Garamond', Georgia, serif",
+              }}
+            >
+              Orders
+            </button>
+            <button
+              onClick={() => setView("sales")}
+              style={{
+                background: view === "sales" ? "#8B7355" : "#efe8df",
+                color: view === "sales" ? "#fff" : "#3a2e1e",
+                border: "none",
+                borderRadius: "18px",
+                padding: "8px 14px",
+                cursor: "pointer",
+                fontWeight: 700,
+                fontFamily: "'Cormorant Garamond', Georgia, serif",
+              }}
+            >
+              Monthly Sales
+            </button>
+          </div>
+
+          {view === "orders" && loading && <p style={{ margin: 0 }}>Loading orders...</p>}
+          {view === "orders" && error && <p style={{ margin: 0, color: "#c0392b" }}>{error}</p>}
+          {view === "orders" && !loading && !error && orders.length === 0 && <p style={{ margin: 0 }}>No orders yet.</p>}
+          {view === "orders" && !loading && !error && orders.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+              <div style={{ display: "grid", gap: "12px", maxHeight: "60vh", overflowY: "auto", paddingRight: "4px" }}>
+                {orders.map((order) => (
+                  <button
+                    key={order.id}
+                    onClick={() => setSelectedOrderId(order.id)}
+                    style={{
+                      border: order.id === selectedOrderId ? "2px solid #8B7355" : "1px solid #e8ddd0",
+                      borderRadius: "10px",
+                      padding: "14px 16px",
+                      background: "#fffdfb",
+                      textAlign: "left",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, color: "#3a2e1e" }}>Order #{order.id} - {order.status}</div>
+                    <div style={{ fontSize: "14px", color: "#6b5a3e" }}>{order.clientName} ({order.clientEmail})</div>
+                    <div style={{ fontSize: "13px", color: "#7d6a55", marginTop: "2px" }}>Drop-off: {order.dropOffDate} | Quote: {order.quotedPrice ?? "Pending"}</div>
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ border: "1px solid #e8ddd0", borderRadius: "10px", padding: "14px 16px", background: "#fffdfb" }}>
+                {!selectedOrder && <p style={{ margin: 0 }}>Select an order.</p>}
+                {selectedOrder && (
+                  <>
+                    <div style={{ fontWeight: 700, color: "#3a2e1e", marginBottom: "10px" }}>Respond to Order #{selectedOrder.id}</div>
+                    <div style={{ display: "grid", gap: "10px" }}>
+                      <input
+                        value={quoteForm.serviceType}
+                        onChange={(e) => setQuoteForm((prev) => ({ ...prev, serviceType: e.target.value }))}
+                        placeholder="Service type (e.g., Deep Cleaning, Reglue)"
+                        style={{ width: "100%", padding: "10px 12px", border: "1px solid #e0dbd4", borderRadius: "8px" }}
+                      />
+                      <input
+                        value={quoteForm.quotedPrice}
+                        onChange={(e) => setQuoteForm((prev) => ({ ...prev, quotedPrice: e.target.value }))}
+                        placeholder="Total payment"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        style={{ width: "100%", padding: "10px 12px", border: "1px solid #e0dbd4", borderRadius: "8px" }}
+                      />
+                      <input
+                        value={quoteForm.estimatedCompletionDate}
+                        onChange={(e) => setQuoteForm((prev) => ({ ...prev, estimatedCompletionDate: e.target.value }))}
+                        type="date"
+                        style={{ width: "100%", padding: "10px 12px", border: "1px solid #e0dbd4", borderRadius: "8px" }}
+                      />
+                      <input
+                        value={quoteForm.claimWindow}
+                        onChange={(e) => setQuoteForm((prev) => ({ ...prev, claimWindow: e.target.value }))}
+                        placeholder="Claim window (e.g., 5 - 7 days)"
+                        style={{ width: "100%", padding: "10px 12px", border: "1px solid #e0dbd4", borderRadius: "8px" }}
+                      />
+                      <button
+                        onClick={saveQuoteAndNotify}
+                        disabled={noteLoading}
+                        style={{
+                          background: "#8B7355", color: "#fff", border: "none", borderRadius: "8px",
+                          padding: "12px 14px", fontSize: "12px", fontWeight: 700, letterSpacing: "1.2px",
+                          cursor: noteLoading ? "not-allowed" : "pointer", opacity: noteLoading ? 0.7 : 1,
+                        }}
+                      >
+                        {noteLoading ? "SAVING..." : selectedOrder.status === "WAITING_FOR_QUOTE" ? "SEND QUOTE TO CLIENT" : "SEND MESSAGE TO CLIENT"}
+                      </button>
+                      <button
+                        onClick={markOrderOngoingCleaning}
+                        disabled={noteLoading || selectedOrder.status !== "QUOTED"}
+                        style={{
+                          background: selectedOrder.status === "QUOTED" ? "#445f7a" : "#9aa5a0",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "8px",
+                          padding: "12px 14px",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          letterSpacing: "1.2px",
+                          cursor: noteLoading || selectedOrder.status !== "QUOTED" ? "not-allowed" : "pointer",
+                          opacity: noteLoading ? 0.7 : 1,
+                        }}
+                        title={selectedOrder.status !== "QUOTED" ? "Order must be QUOTED first" : "Mark this order as ongoing cleaning"}
+                      >
+                        {noteLoading ? "UPDATING..." : "START CLEANING"}
+                      </button>
+                      <button
+                        onClick={markOrderReadyToClaim}
+                        disabled={noteLoading || selectedOrder.status !== "ONGOING_CLEANING"}
+                        style={{
+                          background: selectedOrder.status === "ONGOING_CLEANING" ? "#2d7a46" : "#9aa5a0",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "8px",
+                          padding: "12px 14px",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          letterSpacing: "1.2px",
+                          cursor: noteLoading || selectedOrder.status !== "ONGOING_CLEANING" ? "not-allowed" : "pointer",
+                          opacity: noteLoading ? 0.7 : 1,
+                        }}
+                        title={selectedOrder.status !== "ONGOING_CLEANING" ? "Order must be ONGOING_CLEANING first" : "Mark this order as ready for pickup"}
+                      >
+                        {noteLoading ? "UPDATING..." : "MARK AS READY TO CLAIM"}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          {view === "sales" && (
+            <div>
+              <label style={{ display: "block", marginBottom: "8px", fontSize: "13px", color: "#6b5a3e", fontWeight: 700 }}>
+                Select Month
+              </label>
+              <input
+                type="month"
+                value={month}
+                onChange={(e) => setMonth(e.target.value)}
+                style={{ padding: "10px", borderRadius: "8px", border: "1px solid #d9d1c7", marginBottom: "16px" }}
+              />
+              {salesLoading && <p style={{ margin: 0 }}>Loading monthly sales...</p>}
+              {salesError && <p style={{ margin: 0, color: "#c0392b" }}>{salesError}</p>}
+              {!salesLoading && !salesError && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                  <div style={{ background: "#f9f4ee", borderRadius: "10px", padding: "16px" }}>
+                    <div style={{ fontSize: "12px", color: "#7b6b58", marginBottom: "6px" }}>TOTAL SALES</div>
+                    <div style={{ fontSize: "28px", color: "#3a2e1e", fontWeight: 700 }}>
+                      ₱{Number(monthlySales?.totalSales || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                  <div style={{ background: "#f9f4ee", borderRadius: "10px", padding: "16px" }}>
+                    <div style={{ fontSize: "12px", color: "#7b6b58", marginBottom: "6px" }}>COMPLETED SERVICES</div>
+                    <div style={{ fontSize: "28px", color: "#3a2e1e", fontWeight: 700 }}>
+                      {monthlySales?.completedOrders ?? 0}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function Navbar({
+  cartCount,
+  onCartOpen,
+  onLoginOpen,
+  currentUser,
+  onLogout,
+  onOpenAdminOrders,
+  onOpenAdminSales,
+  clientNotifications = [],
+  unreadNotificationCount = 0,
+  onOpenNotifications = () => {},
+}) {
   const [scrolled, setScrolled] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const profileMenuRef = useRef(null);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40);
@@ -140,6 +642,32 @@ function Navbar({ cartCount, onCartOpen, onLoginOpen }) {
     const el = document.getElementById(sectionId);
     if (el) el.scrollIntoView({ behavior: "smooth" });
   };
+
+  useEffect(() => {
+    const onClickOutside = (event) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
+        setShowProfileMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  const toggleProfileMenu = () => {
+    const nextOpen = !showProfileMenu;
+    setShowProfileMenu(nextOpen);
+    if (nextOpen && currentUser?.role === "CLIENT") {
+      onOpenNotifications();
+    }
+  };
+
+  const displayName = currentUser?.name?.trim() || currentUser?.email || "Account";
+  const initials = displayName
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "U";
 
   return (
     <nav
@@ -192,42 +720,152 @@ function Navbar({ cartCount, onCartOpen, onLoginOpen }) {
 
       {/* Right side */}
       <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
-        <button
-          onClick={onCartOpen}
-          style={{ background: "none", border: "none", cursor: "pointer", padding: 0, position: "relative" }}
-          aria-label="Cart"
-        >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#3a2e1e" strokeWidth="1.8">
-            <circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" />
-            <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
-          </svg>
-          {cartCount > 0 && (
-            <span style={{
-              position: "absolute", top: "-6px", right: "-8px",
-              background: "#e85c2c", color: "#fff", borderRadius: "50%",
-              width: "18px", height: "18px", fontSize: "10px", fontWeight: 700,
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}>{cartCount}</span>
-          )}
-        </button>
-        <button
-          onClick={onLoginOpen}
-          style={{
-            background: "#8B7355", color: "#fff", border: "none", borderRadius: "24px",
-            padding: "9px 22px", fontSize: "12px", fontWeight: 700, letterSpacing: "1.5px",
-            cursor: "pointer", fontFamily: "'Cormorant Garamond', Georgia, serif", transition: "background 0.2s",
-          }}
-          onMouseEnter={(e) => (e.target.style.background = "#6b5a3e")}
-          onMouseLeave={(e) => (e.target.style.background = "#8B7355")}
-        >
-          LOG IN
-        </button>
+        {!currentUser && (
+          <button
+            onClick={onLoginOpen}
+            style={{
+              background: "#8B7355", color: "#fff", border: "none", borderRadius: "24px",
+              padding: "9px 22px", fontSize: "12px", fontWeight: 700, letterSpacing: "1.5px",
+              cursor: "pointer", fontFamily: "'Cormorant Garamond', Georgia, serif", transition: "background 0.2s",
+            }}
+            onMouseEnter={(e) => (e.target.style.background = "#6b5a3e")}
+            onMouseLeave={(e) => (e.target.style.background = "#8B7355")}
+          >
+            LOG IN
+          </button>
+        )}
+
+        {currentUser && (
+          <div ref={profileMenuRef} style={{ position: "relative" }}>
+            <button
+              onClick={toggleProfileMenu}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                border: "1px solid #e2d8cd",
+                background: "#fff",
+                borderRadius: "24px",
+                padding: "6px 10px 6px 6px",
+                cursor: "pointer",
+                minWidth: "160px",
+              }}
+            >
+              <div style={{
+                width: "28px",
+                height: "28px",
+                borderRadius: "50%",
+                background: "#8B7355",
+                color: "#fff",
+                fontSize: "11px",
+                fontWeight: 700,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}>
+                {initials}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", minWidth: 0 }}>
+                <span style={{ fontSize: "12px", fontWeight: 700, color: "#3a2e1e", maxWidth: "100px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {displayName}
+                </span>
+                <span style={{ fontSize: "10px", color: "#8b7a65", letterSpacing: "0.8px" }}>
+                  {currentUser.role}
+                </span>
+              </div>
+              <span style={{ marginLeft: "auto", color: "#7a6a57", fontSize: "11px" }}>{showProfileMenu ? "▲" : "▼"}</span>
+            </button>
+
+            {showProfileMenu && (
+              <div style={{
+                position: "absolute",
+                right: 0,
+                top: "42px",
+                width: "340px",
+                background: "#fff",
+                border: "1px solid #ece3d8",
+                borderRadius: "12px",
+                boxShadow: "0 16px 40px rgba(0,0,0,0.14)",
+                overflow: "hidden",
+              }}>
+                <div style={{ padding: "10px 14px", borderBottom: "1px solid #f1ebe4", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "1px", color: "#6b5a3e" }}>PROFILE MENU</span>
+                  {currentUser.role === "CLIENT" && unreadNotificationCount > 0 && (
+                    <span style={{ fontSize: "11px", color: "#d14d1f", fontWeight: 700 }}>
+                      {unreadNotificationCount} new
+                    </span>
+                  )}
+                </div>
+
+                {currentUser.role === "CLIENT" && (
+                  <>
+                    <button
+                      onClick={() => {
+                        setShowProfileMenu(false);
+                        onCartOpen();
+                      }}
+                      style={{ width: "100%", textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: "11px 14px", fontSize: "13px", color: "#3a2e1e" }}
+                    >
+                      Cart {cartCount > 0 ? `(${cartCount})` : ""}
+                    </button>
+                    <div style={{ borderTop: "1px solid #f5efe8", padding: "8px 14px 10px" }}>
+                      <div style={{ fontSize: "11px", fontWeight: 700, color: "#7a6752", marginBottom: "6px" }}>Notifications</div>
+                      {clientNotifications.length === 0 ? (
+                        <div style={{ fontSize: "12px", color: "#9a8b78" }}>No notifications yet.</div>
+                      ) : (
+                        clientNotifications.slice(0, 3).map((notification) => (
+                          <div key={notification.id} style={{ padding: "7px 0", borderTop: "1px solid #f5efe8" }}>
+                            <div style={{ fontSize: "12px", fontWeight: 700, color: "#4a3d2f" }}>Order #{notification.orderId}</div>
+                            <div style={{ fontSize: "12px", color: "#6b5a48", lineHeight: 1.4 }}>{notification.message}</div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {currentUser.role === "ADMIN" && (
+                  <>
+                    <button
+                      onClick={() => {
+                        setShowProfileMenu(false);
+                        onOpenAdminOrders();
+                      }}
+                      style={{ width: "100%", textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: "11px 14px", fontSize: "13px", color: "#3a2e1e" }}
+                    >
+                      Admin Orders
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowProfileMenu(false);
+                        onOpenAdminSales();
+                      }}
+                      style={{ width: "100%", textAlign: "left", background: "none", border: "none", borderTop: "1px solid #f5efe8", cursor: "pointer", padding: "11px 14px", fontSize: "13px", color: "#3a2e1e" }}
+                    >
+                      Monthly Sales
+                    </button>
+                  </>
+                )}
+
+                <button
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    onLogout();
+                  }}
+                  style={{ width: "100%", textAlign: "left", background: "#fff7f4", border: "none", borderTop: "1px solid #f1ebe4", cursor: "pointer", padding: "11px 14px", fontSize: "13px", fontWeight: 700, color: "#b14722" }}
+                >
+                  Log out
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </nav>
   );
 }
 
-function Hero() {
+function Hero({ onBookAction }) {
   return (
     <section
       id="section-home"
@@ -333,6 +971,7 @@ function Hero() {
               fontFamily: "'Cormorant Garamond', Georgia, serif",
               transition: "background 0.2s, transform 0.15s",
             }}
+            onClick={onBookAction}
             onMouseEnter={(e) => { e.target.style.background = "#6b5a3e"; e.target.style.transform = "translateY(-1px)"; }}
             onMouseLeave={(e) => { e.target.style.background = "#8B7355"; e.target.style.transform = "translateY(0)"; }}
           >
@@ -352,6 +991,7 @@ function Hero() {
               fontFamily: "'Cormorant Garamond', Georgia, serif",
               transition: "border-color 0.2s, color 0.2s, transform 0.15s",
             }}
+            onClick={onBookAction}
             onMouseEnter={(e) => { e.target.style.borderColor = "#fff"; e.target.style.transform = "translateY(-1px)"; }}
             onMouseLeave={(e) => { e.target.style.borderColor = "rgba(255,255,255,0.7)"; e.target.style.transform = "translateY(0)"; }}
           >
@@ -527,9 +1167,10 @@ const SERVICES = [
   },
 ];
 
-function BookingModal({ service, onClose }) {
+function BookingModal({ service, onClose, authToken }) {
   const [form, setForm] = useState({
     serviceType: service ? service.name : "Standard Cleaning",
+    dropOffDate: "",
     name: "",
     contact: "",
     email: "",
@@ -540,6 +1181,8 @@ function BookingModal({ service, onClose }) {
   });
   const [submitted, setSubmitted] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
 
   const inputStyle = {
     width: "100%",
@@ -566,11 +1209,54 @@ function BookingModal({ service, onClose }) {
 
   const handleFiles = (files) => {
     const valid = Array.from(files).filter(f => f.type.match(/image\/(png|jpeg)/));
-    setForm(prev => ({ ...prev, photos: [...prev.photos, ...valid].slice(0, 5) }));
+    setForm(prev => ({ ...prev, photos: [...prev.photos, ...valid].slice(0, 3) }));
   };
 
-  const handleSubmit = () => {
-    setSubmitted(true);
+  const handleSubmit = async () => {
+    if (!authToken) {
+      setSubmitError("Please log in first.");
+      return;
+    }
+    if (!form.dropOffDate) {
+      setSubmitError("Preferred drop-off date is required.");
+      return;
+    }
+    if (form.photos.length < 1 || form.photos.length > 3) {
+      setSubmitError("Upload 1 to 3 shoe images.");
+      return;
+    }
+
+    setSubmitting(true);
+    setSubmitError("");
+    try {
+      const payload = new FormData();
+      payload.append("dropOffDate", form.dropOffDate);
+      payload.append("shoeType", form.serviceType);
+      form.photos.forEach((photo) => payload.append("images", photo));
+
+      const response = await fetch(`${API_BASE_URL}/client/orders`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${authToken}` },
+        body: payload,
+      });
+      const text = await response.text();
+      let data = null;
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = { message: text };
+        }
+      }
+      if (!response.ok) {
+        throw new Error(data?.message || "Failed to submit booking");
+      }
+      setSubmitted(true);
+    } catch (err) {
+      setSubmitError(err.message || "Failed to submit booking");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return createPortal(
@@ -627,6 +1313,16 @@ function BookingModal({ service, onClose }) {
                     <option key={s} value={s}>{s}</option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label style={labelStyle}>Preferred Drop-off Date <span style={{ color: "#e85c2c" }}>*</span></label>
+                <input
+                  type="date"
+                  value={form.dropOffDate}
+                  onChange={(e) => setForm({ ...form, dropOffDate: e.target.value })}
+                  style={inputStyle}
+                />
               </div>
 
               <div>
@@ -693,7 +1389,7 @@ function BookingModal({ service, onClose }) {
                     Click to upload or drag and drop
                   </p>
                   <p style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "12px", color: "#aaa", margin: 0 }}>
-                    PNG, JPG up to 10MB
+                    PNG, JPG - up to 3 images
                   </p>
                   <input id="sneaker-photo-input" type="file" accept="image/png,image/jpeg" multiple
                     style={{ display: "none" }} onChange={(e) => handleFiles(e.target.files)} />
@@ -748,17 +1444,24 @@ function BookingModal({ service, onClose }) {
 
               <button
                 onClick={handleSubmit}
+                disabled={submitting}
                 style={{
                   background: "#8B7355", color: "#fff", border: "none",
                   borderRadius: "8px", padding: "16px", fontSize: "13px", fontWeight: 700,
                   letterSpacing: "2px", cursor: "pointer", fontFamily: "'Cormorant Garamond', Georgia, serif",
                   transition: "background 0.2s", width: "100%", marginTop: "4px",
+                  opacity: submitting ? 0.7 : 1,
                 }}
                 onMouseEnter={(e) => (e.target.style.background = "#6b5a3e")}
                 onMouseLeave={(e) => (e.target.style.background = "#8B7355")}
               >
-                BOOK NOW
+                {submitting ? "SUBMITTING..." : "BOOK NOW"}
               </button>
+              {submitError && (
+                <p style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "13px", color: "#c0392b", margin: 0 }}>
+                  {submitError}
+                </p>
+              )}
 
             </div>
           </div>
@@ -768,7 +1471,7 @@ function BookingModal({ service, onClose }) {
     document.body
   );
 }
-function ServiceCard({ service, onAddToCart }) {
+function ServiceCard({ service, onAddToCart, canBook, onRequireLogin, authToken }) {
   const [hovered, setHovered] = useState(false);
   const [showBooking, setShowBooking] = useState(false);
 
@@ -909,7 +1612,13 @@ function ServiceCard({ service, onAddToCart }) {
               }}
               onMouseEnter={(e) => (e.target.style.background = "#2a3a4a")}
               onMouseLeave={(e) => (e.target.style.background = "#3a4a5a")}
-              onClick={() => onAddToCart && onAddToCart(service)}
+              onClick={() => {
+                if (!canBook) {
+                  onRequireLogin && onRequireLogin();
+                  return;
+                }
+                onAddToCart && onAddToCart(service);
+              }}
             >
               ADD TO CART
             </button>
@@ -929,19 +1638,25 @@ function ServiceCard({ service, onAddToCart }) {
               }}
               onMouseEnter={(e) => (e.target.style.background = "#6b5a3e")}
               onMouseLeave={(e) => (e.target.style.background = "#8B7355")}
-              onClick={() => setShowBooking(true)}
+              onClick={() => {
+                if (!canBook) {
+                  onRequireLogin && onRequireLogin();
+                  return;
+                }
+                setShowBooking(true);
+              }}
             >
               BOOK NOW
             </button>
           </div>
         </div>
       </div>
-      {showBooking && <BookingModal service={service} onClose={() => setShowBooking(false)} />}
+      {showBooking && <BookingModal service={service} onClose={() => setShowBooking(false)} authToken={authToken} />}
     </div>
   );
 }
 
-function ServicesSection({ onAddToCart }) {
+function ServicesSection({ onAddToCart, canBook, onRequireLogin, authToken }) {
   return (
     <section id="section-services" style={{ background: "#fff", padding: "100px 80px" }}>
       {/* Header */}
@@ -978,7 +1693,14 @@ function ServicesSection({ onAddToCart }) {
         margin: "0 auto",
       }}>
         {SERVICES.map((service) => (
-          <ServiceCard key={service.id} service={service} onAddToCart={onAddToCart} />
+          <ServiceCard
+            key={service.id}
+            service={service}
+            onAddToCart={onAddToCart}
+            canBook={canBook}
+            onRequireLogin={onRequireLogin}
+            authToken={authToken}
+          />
         ))}
       </div>
     </section>
@@ -1472,6 +2194,81 @@ export default function App() {
   const [cart, setCart] = useState([]);
   const [showCart, setShowCart] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
+  const [showAdminOrders, setShowAdminOrders] = useState(false);
+  const [adminModalView, setAdminModalView] = useState("orders");
+  const [clientNotifications, setClientNotifications] = useState([]);
+  const [clientNotificationSeenAt, setClientNotificationSeenAt] = useState(() => {
+    const raw = localStorage.getItem(CLIENT_NOTIFICATION_SEEN_AT_KEY);
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : 0;
+  });
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem(AUTH_TOKEN_KEY) || "");
+  const [currentUser, setCurrentUser] = useState(() => {
+    const raw = localStorage.getItem(AUTH_USER_KEY);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  });
+  const isClientLoggedIn = Boolean(authToken && currentUser?.role === "CLIENT");
+
+  useEffect(() => {
+    if (!authToken || currentUser?.role !== "CLIENT") {
+      setClientNotifications([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadClientNotifications = async () => {
+      try {
+        const orders = await apiRequest("/client/orders", { token: authToken });
+        const safeOrders = Array.isArray(orders) ? orders : [];
+        const messageLists = await Promise.all(
+          safeOrders.map(async (order) => {
+            try {
+              const messages = await apiRequest(`/orders/${order.id}/messages`, { token: authToken });
+              const safeMessages = Array.isArray(messages) ? messages : [];
+              return safeMessages
+                .filter((m) => m.senderRole === "ADMIN")
+                .map((m) => ({
+                  id: `${order.id}-${m.id}`,
+                  orderId: order.id,
+                  message: m.message,
+                  timestamp: m.timestamp,
+                }));
+            } catch {
+              return [];
+            }
+          })
+        );
+        const combined = messageLists
+          .flat()
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+        if (!cancelled) {
+          setClientNotifications(combined);
+        }
+      } catch {
+        if (!cancelled) {
+          setClientNotifications([]);
+        }
+      }
+    };
+
+    loadClientNotifications();
+    const intervalId = setInterval(loadClientNotifications, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, [authToken, currentUser?.role]);
+
+  const unreadNotificationCount = clientNotifications.filter(
+    (notification) => new Date(notification.timestamp).getTime() > clientNotificationSeenAt
+  ).length;
 
   const addToCart = (service) => {
     setCart((prev) => [...prev, service]);
@@ -1481,22 +2278,86 @@ export default function App() {
     setCart((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const handleAuthSuccess = ({ token, user }) => {
+    setAuthToken(token);
+    setCurrentUser(user);
+    localStorage.setItem(AUTH_TOKEN_KEY, token);
+    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
+  };
+
+  const handleLogout = () => {
+    setAuthToken("");
+    setCurrentUser(null);
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    localStorage.removeItem(AUTH_USER_KEY);
+    localStorage.removeItem(CLIENT_NOTIFICATION_SEEN_AT_KEY);
+    setClientNotifications([]);
+    setClientNotificationSeenAt(0);
+  };
+
+  const handleOpenNotifications = () => {
+    const seenAt = Date.now();
+    setClientNotificationSeenAt(seenAt);
+    localStorage.setItem(CLIENT_NOTIFICATION_SEEN_AT_KEY, String(seenAt));
+  };
+
+  const handleBookAction = () => {
+    if (!authToken) {
+      setShowLogin(true);
+      return;
+    }
+    if (currentUser?.role !== "CLIENT") {
+      alert("Booking is available for CLIENT accounts only.");
+      return;
+    }
+    const el = document.getElementById("section-services");
+    if (el) el.scrollIntoView({ behavior: "smooth" });
+  };
+
   return (
-    <div style={{ margin: 0, padding: 0, boxSizing: "border-box" }}>
-      <Navbar
-        cartCount={cart.length}
-        onCartOpen={() => setShowCart(true)}
-        onLoginOpen={() => setShowLogin(true)}
-      />
-      <Hero />
-      <AboutSection />
-      <ServicesSection onAddToCart={addToCart} />
-      <BranchesSection />
-      <ReviewsSection />
-      <AuthoritySection />
-      <Footer />
-      {showCart && <CartSidebar cart={cart} onClose={() => setShowCart(false)} onRemove={removeFromCart} />}
-      {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}
-    </div>
+    <Router>
+      <Routes>
+        <Route path="/oauth/callback" element={<OAuth2Callback />} />
+        <Route path="/" element={
+          <div style={{ margin: 0, padding: 0, boxSizing: "border-box" }}>
+            <Navbar
+              cartCount={cart.length}
+              onCartOpen={() => setShowCart(true)}
+              onLoginOpen={() => setShowLogin(true)}
+              currentUser={currentUser}
+              onLogout={handleLogout}
+              onOpenAdminOrders={() => {
+                setAdminModalView("orders");
+                setShowAdminOrders(true);
+              }}
+              onOpenAdminSales={() => {
+                setAdminModalView("sales");
+                setShowAdminOrders(true);
+              }}
+              clientNotifications={clientNotifications}
+              unreadNotificationCount={unreadNotificationCount}
+              onOpenNotifications={handleOpenNotifications}
+            />
+            <Hero onBookAction={handleBookAction} />
+            <AboutSection />
+            <ServicesSection
+              onAddToCart={addToCart}
+              canBook={isClientLoggedIn}
+              onRequireLogin={handleBookAction}
+              authToken={authToken}
+            />
+            <BranchesSection />
+            <ReviewsSection />
+            <AuthoritySection />
+            <Footer />
+            {showCart && <CartSidebar cart={cart} onClose={() => setShowCart(false)} onRemove={removeFromCart} />}
+            {showLogin && <AuthModal onClose={() => setShowLogin(false)} onAuthSuccess={handleAuthSuccess} />}
+            {showAdminOrders && authToken && currentUser?.role === "ADMIN" && (
+              <AdminOrdersModal onClose={() => setShowAdminOrders(false)} token={authToken} initialView={adminModalView} />
+            )}
+          </div>
+        } />
+      </Routes>
+    </Router>
   );
 }
