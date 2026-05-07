@@ -1,4 +1,4 @@
-package com.sia.demo.controller;
+package com.sia.demo.feature.auth;
 
 import com.sia.demo.dto.AuthLoginRequest;
 import com.sia.demo.dto.AuthRegisterRequest;
@@ -8,6 +8,7 @@ import com.sia.demo.model.User;
 import com.sia.demo.repository.UserRepository;
 import com.sia.demo.security.JwtService;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.AuthenticationException;
@@ -17,7 +18,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
-import static org.springframework.http.HttpStatus.BAD_REQUEST;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -42,7 +42,7 @@ public class AuthController {
     @PostMapping("/register")
     public AuthResponse register(@Valid @RequestBody AuthRegisterRequest request) {
         if (userRepository.existsByEmail(request.email())) {
-            throw new ResponseStatusException(BAD_REQUEST, "Email is already registered");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email is already registered");
         }
         User user = new User();
         user.setName(request.name());
@@ -61,10 +61,10 @@ public class AuthController {
                     new UsernamePasswordAuthenticationToken(request.email().toLowerCase(), request.password())
             );
         } catch (AuthenticationException ex) {
-            throw new ResponseStatusException(BAD_REQUEST, "Invalid credentials");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid credentials");
         }
         User user = userRepository.findByEmail(request.email().toLowerCase())
-                .orElseThrow(() -> new ResponseStatusException(BAD_REQUEST, "Invalid credentials"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid credentials"));
         String token = jwtService.generateToken(user);
         return new AuthResponse(token, user.getRole(), user.getName(), user.getEmail());
     }

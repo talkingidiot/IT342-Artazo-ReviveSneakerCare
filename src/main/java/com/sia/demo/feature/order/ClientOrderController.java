@@ -1,4 +1,4 @@
-package com.sia.demo.controller;
+package com.sia.demo.feature.order;
 
 import com.sia.demo.dto.OrderResponse;
 import com.sia.demo.model.User;

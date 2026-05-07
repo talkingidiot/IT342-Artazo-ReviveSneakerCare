@@ -1,11 +1,11 @@
-package com.sia.demo.controller;
+package com.sia.demo.feature.admin;
 
 import com.sia.demo.dto.AdminMonthlySalesResponse;
 import com.sia.demo.dto.AdminQuoteRequest;
 import com.sia.demo.dto.AdminStatusUpdateRequest;
 import com.sia.demo.dto.OrderResponse;
-import com.sia.demo.service.OrderService;
 import com.sia.demo.service.DtoMapper;
+import com.sia.demo.service.OrderService;
 import jakarta.validation.Valid;
 import java.time.YearMonth;
 import java.util.List;
