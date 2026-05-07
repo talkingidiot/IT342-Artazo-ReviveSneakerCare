@@ -5,6 +5,7 @@ import com.sia.demo.model.OrderStatus;
 import com.sia.demo.model.User;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -15,6 +16,7 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     List<Order> findAllByOrderByCreatedAtDesc();
 
     long countByStatusAndEstimatedCompletionDateBetween(OrderStatus status, LocalDate startDate, LocalDate endDate);
+    long countByStatusInAndEstimatedCompletionDateBetween(Collection<OrderStatus> statuses, LocalDate startDate, LocalDate endDate);
 
     @Query("""
             select coalesce(sum(o.quotedPrice), 0)
@@ -25,6 +27,19 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
             """)
     BigDecimal sumQuotedPriceByStatusAndEstimatedCompletionDateBetween(
             @Param("status") OrderStatus status,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate
+    );
+
+    @Query("""
+            select coalesce(sum(o.quotedPrice), 0)
+            from Order o
+            where o.status in :statuses
+              and o.estimatedCompletionDate between :startDate and :endDate
+              and o.quotedPrice is not null
+            """)
+    BigDecimal sumQuotedPriceByStatusInAndEstimatedCompletionDateBetween(
+            @Param("statuses") Collection<OrderStatus> statuses,
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate
     );

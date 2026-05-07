@@ -5,5 +5,6 @@ public enum OrderStatus {
     QUOTED,
     ONGOING_CLEANING,
     READY_FOR_PICKUP,
+    CLAIMED,
     COMPLETED
 }

@@ -10,6 +10,7 @@ import com.sia.demo.model.User;
 import com.sia.demo.repository.OrderRepository;
 import java.time.LocalDate;
 import java.time.YearMonth;
+import java.util.EnumSet;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -28,7 +29,7 @@ public class OrderService {
         NEXT_STATUS.put(OrderStatus.WAITING_FOR_QUOTE, OrderStatus.QUOTED);
         NEXT_STATUS.put(OrderStatus.QUOTED, OrderStatus.ONGOING_CLEANING);
         NEXT_STATUS.put(OrderStatus.ONGOING_CLEANING, OrderStatus.READY_FOR_PICKUP);
-        NEXT_STATUS.put(OrderStatus.READY_FOR_PICKUP, OrderStatus.COMPLETED);
+        NEXT_STATUS.put(OrderStatus.READY_FOR_PICKUP, OrderStatus.CLAIMED);
     }
 
     private final OrderRepository orderRepository;
@@ -83,18 +84,24 @@ public class OrderService {
         LocalDate startDate = targetMonth.atDay(1);
         LocalDate endDate = targetMonth.atEndOfMonth();
 
-        long completedOrders = orderRepository.countByStatusAndEstimatedCompletionDateBetween(
-                OrderStatus.COMPLETED,
+        var completedStatuses = EnumSet.of(OrderStatus.CLAIMED, OrderStatus.COMPLETED);
+        long completedOrders = orderRepository.countByStatusInAndEstimatedCompletionDateBetween(
+                completedStatuses,
                 startDate,
                 endDate
         );
-        var totalSales = orderRepository.sumQuotedPriceByStatusAndEstimatedCompletionDateBetween(
-                OrderStatus.COMPLETED,
+        var totalSales = orderRepository.sumQuotedPriceByStatusInAndEstimatedCompletionDateBetween(
+                completedStatuses,
+                startDate,
+                endDate
+        );
+        long unclaimedOrders = orderRepository.countByStatusAndEstimatedCompletionDateBetween(
+                OrderStatus.READY_FOR_PICKUP,
                 startDate,
                 endDate
         );
 
-        return new AdminMonthlySalesResponse(targetMonth.toString(), totalSales, completedOrders);
+        return new AdminMonthlySalesResponse(targetMonth.toString(), totalSales, completedOrders, unclaimedOrders);
     }
 
     @Transactional

@@ -5,6 +5,7 @@ import java.math.BigDecimal;
 public record AdminMonthlySalesResponse(
         String month,
         BigDecimal totalSales,
-        long completedOrders
+        long completedOrders,
+        long unclaimedOrders
 ) {
 }
