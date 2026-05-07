@@ -3,6 +3,9 @@ import { createPortal } from "react-dom";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import { OAuth2Callback } from "./OAuth2Callback";
 import { GitHubLoginButton } from "./GitHubLoginButton";
+import gcashQr from "./assets/gcash-qr.png";
+import bpiQr from "./assets/bpi-qr.png";
+import branchPhoto from "./assets/branch-photo.png";
 
 const NAV_LINKS = ["HOME", "SERVICES", "BRANCHES", "ABOUT US", "CONTACT US"];
 
@@ -46,7 +49,7 @@ async function apiRequest(path, { method = "GET", body, token } = {}) {
   return data;
 }
 
-function CartSidebar({ cart, onClose, onRemove }) {
+function CartSidebar({ cart, onClose, onRemove, onProceed }) {
   const total = cart.reduce((sum, item) => sum + (item.basePrice || 0), 0);
   return createPortal(
     <div style={{ position: "fixed", inset: 0, zIndex: 998, display: "flex" }}
@@ -94,12 +97,15 @@ function CartSidebar({ cart, onClose, onRemove }) {
                 {total > 0 ? `From ₱${total}` : "See pricing"}
               </span>
             </div>
-            <button style={{
+            <button
+              onClick={onProceed}
+              style={{
               width: "100%", background: "#8B7355", color: "#fff", border: "none",
               borderRadius: "8px", padding: "14px",
               fontSize: "12px", fontWeight: 700, letterSpacing: "2px",
               cursor: "pointer", fontFamily: "'Cormorant Garamond', Georgia, serif",
-            }}>
+              }}
+            >
               PROCEED TO CHECKOUT
             </button>
           </div>
@@ -419,6 +425,31 @@ function AdminOrdersModal({ onClose, token, initialView = "orders" }) {
     }
   };
 
+  const markOrderClaimed = async () => {
+    if (!selectedOrder || selectedOrder.status !== "READY_FOR_PICKUP") {
+      return;
+    }
+    setNoteLoading(true);
+    setError("");
+    try {
+      await apiRequest(`/admin/orders/${selectedOrder.id}/status`, {
+        method: "PATCH",
+        token,
+        body: { status: "CLAIMED" },
+      });
+      await apiRequest(`/orders/${selectedOrder.id}/messages`, {
+        method: "POST",
+        token,
+        body: { message: "Your shoes have been claimed. Thank you!" },
+      });
+      await loadOrders();
+    } catch (err) {
+      setError(err.message || "Failed to mark order as claimed");
+    } finally {
+      setNoteLoading(false);
+    }
+  };
+
   return createPortal(
     <div style={{ position: "fixed", inset: 0, zIndex: 999, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -571,6 +602,25 @@ function AdminOrdersModal({ onClose, token, initialView = "orders" }) {
                       >
                         {noteLoading ? "UPDATING..." : "MARK AS READY TO CLAIM"}
                       </button>
+                      <button
+                        onClick={markOrderClaimed}
+                        disabled={noteLoading || selectedOrder.status !== "READY_FOR_PICKUP"}
+                        style={{
+                          background: selectedOrder.status === "READY_FOR_PICKUP" ? "#3f5d3f" : "#9aa5a0",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "8px",
+                          padding: "12px 14px",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          letterSpacing: "1.2px",
+                          cursor: noteLoading || selectedOrder.status !== "READY_FOR_PICKUP" ? "not-allowed" : "pointer",
+                          opacity: noteLoading ? 0.7 : 1,
+                        }}
+                        title={selectedOrder.status !== "READY_FOR_PICKUP" ? "Order must be READY_FOR_PICKUP first" : "Mark this order as claimed"}
+                      >
+                        {noteLoading ? "UPDATING..." : "MARK AS CLAIMED"}
+                      </button>
                     </div>
                   </>
                 )}
@@ -605,6 +655,12 @@ function AdminOrdersModal({ onClose, token, initialView = "orders" }) {
                       {monthlySales?.completedOrders ?? 0}
                     </div>
                   </div>
+                  <div style={{ background: "#f9f4ee", borderRadius: "10px", padding: "16px" }}>
+                    <div style={{ fontSize: "12px", color: "#7b6b58", marginBottom: "6px" }}>UNCLAIMED SHOES</div>
+                    <div style={{ fontSize: "28px", color: "#3a2e1e", fontWeight: 700 }}>
+                      {monthlySales?.unclaimedOrders ?? 0}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -631,6 +687,7 @@ function Navbar({
   const [scrolled, setScrolled] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const profileMenuRef = useRef(null);
+  const clientAlertCount = (currentUser?.role === "CLIENT" ? cartCount : 0) + unreadNotificationCount;
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40);
@@ -749,8 +806,32 @@ function Navbar({
                 padding: "6px 10px 6px 6px",
                 cursor: "pointer",
                 minWidth: "160px",
+                position: "relative",
               }}
             >
+              {clientAlertCount > 0 && (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: "-6px",
+                    right: "-6px",
+                    minWidth: "18px",
+                    height: "18px",
+                    borderRadius: "999px",
+                    background: "#d93025",
+                    color: "#fff",
+                    fontSize: "10px",
+                    fontWeight: 700,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "0 5px",
+                    lineHeight: 1,
+                  }}
+                >
+                  {clientAlertCount > 99 ? "99+" : clientAlertCount}
+                </span>
+              )}
               <div style={{
                 width: "28px",
                 height: "28px",
@@ -1130,7 +1211,7 @@ const SERVICES = [
     icon: "✦",
     description: "Basic cleaning service to refresh your sneakers. Includes surface cleaning, dirt removal, and basic stain treatment.",
     features: ["Surface cleaning", "Dirt & dust removal", "Basic stain treatment", "Lace cleaning"],
-    price: "From ₱25",
+    price: "₱400",
     imageBg: "linear-gradient(135deg, #c9b99a 0%, #a08060 100%)",
     imageLabel: "SERVICE IMAGE",
   },
@@ -1140,7 +1221,7 @@ const SERVICES = [
     icon: "⟐",
     description: "Comprehensive deep cleaning for heavily soiled sneakers. Includes intensive stain removal and complete restoration.",
     features: ["Intensive cleaning", "Deep stain removal", "Sole whitening", "Interior cleaning", "Deodorizing"],
-    price: "From ₱45",
+    price: "₱600",
     imageBg: "linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%)",
     imageLabel: "SERVICE IMAGE",
     dark: true,
@@ -1149,9 +1230,9 @@ const SERVICES = [
     id: "reglue",
     name: "Reglue",
     icon: "⚙",
-    description: "Expert sole reattachment and repair service. We fix loose soles and restore structural integrity to your sneakers.",
-    features: ["Sole reattachment", "Structural repair", "Industrial adhesive", "24-hour curing time"],
-    price: "From ₱35",
+    description: "Reglue starts at ₱400. Final pricing depends on the admin's comment or reply after inspection.",
+    features: ["Sole reattachment", "Structural repair", "Admin review required", "Price may vary"],
+    price: "Starts at ₱400",
     imageBg: "linear-gradient(135deg, #8a6a4a 0%, #5a3a1a 100%)",
     imageLabel: "SERVICE IMAGE",
   },
@@ -1161,7 +1242,7 @@ const SERVICES = [
     icon: "◈",
     description: "Professional color restoration and custom painting. Bring faded colors back to life or customize your sneakers.",
     features: ["Color restoration", "Custom painting", "Premium paint", "Protective finish", "Color matching"],
-    price: "From ₱60",
+    price: "₱400",
     imageBg: "linear-gradient(135deg, #e8e8e8 0%, #c0c0c0 100%)",
     imageLabel: "SERVICE IMAGE",
   },
@@ -1178,11 +1259,28 @@ function BookingModal({ service, onClose, authToken }) {
     remarks: "",
     payment: "",
     photos: [],
+    paymentProof: null,
   });
   const [submitted, setSubmitted] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [qrPreview, setQrPreview] = useState(null);
+  const paymentOptions = ["GCASH", "BPI"];
+  const paymentQrMeta = {
+    GCASH: {
+      title: "GCash QR",
+      subtitle: "Scan to pay, then upload the screenshot below.",
+      accent: "#2ABF88",
+      qrSrc: gcashQr,
+    },
+    BPI: {
+      title: "BPI QR",
+      subtitle: "Scan to pay, then upload the screenshot below.",
+      accent: "#0B57D0",
+      qrSrc: bpiQr,
+    },
+  };
 
   const inputStyle = {
     width: "100%",
@@ -1190,8 +1288,8 @@ function BookingModal({ service, onClose, authToken }) {
     border: "1.5px solid #e0dbd4",
     borderRadius: "8px",
     fontSize: "14px",
-    fontFamily: "'Cormorant Garamond', Georgia, serif",
-    color: "#3a2e1e",
+    fontFamily: "Inter, Arial, sans-serif",
+    color: "#2f2418",
     background: "#fff",
     outline: "none",
     boxSizing: "border-box",
@@ -1200,11 +1298,12 @@ function BookingModal({ service, onClose, authToken }) {
 
   const labelStyle = {
     display: "block",
-    fontFamily: "'Cormorant Garamond', Georgia, serif",
-    fontSize: "14px",
+    fontFamily: "Inter, Arial, sans-serif",
+    fontSize: "13px",
     fontWeight: 600,
-    color: "#3a2e1e",
+    color: "#4a3a29",
     marginBottom: "7px",
+    letterSpacing: "0",
   };
 
   const handleFiles = (files) => {
@@ -1212,17 +1311,36 @@ function BookingModal({ service, onClose, authToken }) {
     setForm(prev => ({ ...prev, photos: [...prev.photos, ...valid].slice(0, 3) }));
   };
 
+  const handlePaymentProof = (fileList) => {
+    const file = fileList?.[0];
+    if (!file) return;
+    if (!file.type.match(/image\/(png|jpeg)/)) {
+      setSubmitError("Upload a PNG or JPG payment screenshot.");
+      return;
+    }
+    setSubmitError("");
+    setForm((prev) => ({ ...prev, paymentProof: file }));
+  };
+
   const handleSubmit = async () => {
     if (!authToken) {
-      setSubmitError("Please log in first.");
+      setSubmitError("Please log in to continue.");
       return;
     }
     if (!form.dropOffDate) {
-      setSubmitError("Preferred drop-off date is required.");
+      setSubmitError("Please choose a drop-off date.");
       return;
     }
     if (form.photos.length < 1 || form.photos.length > 3) {
-      setSubmitError("Upload 1 to 3 shoe images.");
+      setSubmitError("Upload 1 to 3 shoe photos.");
+      return;
+    }
+    if (!form.payment) {
+      setSubmitError("Please select a payment method.");
+      return;
+    }
+    if (!form.paymentProof) {
+      setSubmitError("Please upload your payment screenshot.");
       return;
     }
 
@@ -1233,6 +1351,8 @@ function BookingModal({ service, onClose, authToken }) {
       payload.append("dropOffDate", form.dropOffDate);
       payload.append("shoeType", form.serviceType);
       form.photos.forEach((photo) => payload.append("images", photo));
+      payload.append("paymentMethod", form.payment);
+      payload.append("paymentProof", form.paymentProof);
 
       const response = await fetch(`${API_BASE_URL}/client/orders`, {
         method: "POST",
@@ -1260,6 +1380,68 @@ function BookingModal({ service, onClose, authToken }) {
   };
 
   return createPortal(
+    <>
+      {qrPreview && (
+        <div
+          onClick={() => setQrPreview(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            background: "rgba(0,0,0,0.82)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "24px",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(92vw, 420px)",
+              maxHeight: "90vh",
+              background: "#fff",
+              borderRadius: "12px",
+              padding: "10px",
+              boxShadow: "0 24px 80px rgba(0,0,0,0.45)",
+            }}
+          >
+            <img
+              src={qrPreview.qrSrc}
+              alt={`${qrPreview.title} enlarged`}
+              style={{
+                width: "100%",
+                height: "auto",
+                display: "block",
+                borderRadius: "8px",
+                objectFit: "contain",
+                cursor: "zoom-out",
+              }}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => setQrPreview(null)}
+            style={{
+              position: "fixed",
+              top: "20px",
+              right: "20px",
+              width: "40px",
+              height: "40px",
+              borderRadius: "50%",
+              border: "none",
+              background: "rgba(255,255,255,0.12)",
+              color: "#fff",
+              fontSize: "22px",
+              cursor: "pointer",
+              lineHeight: 1,
+            }}
+            aria-label="Close QR preview"
+          >
+            ×
+          </button>
+        </div>
+      )}
     <div
       style={{
         position: "fixed", inset: 0, zIndex: 999,
@@ -1279,34 +1461,37 @@ function BookingModal({ service, onClose, authToken }) {
         boxShadow: "0 24px 80px rgba(0,0,0,0.22)",
         position: "relative",
       }}>
-        <div style={{ padding: "32px 36px 24px", borderBottom: "1px solid #f0ebe4" }}>
+        <div style={{ padding: "28px 32px 18px", borderBottom: "1px solid #f0ebe4" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <h2 style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "28px", fontWeight: 700, color: "#3a2e1e", margin: 0 }}>
-              Book Your Shoes
-            </h2>
-            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "22px", color: "#999", lineHeight: 1, padding: "4px" }}>
-              \u2715
-            </button>
+            <div>
+              <h2 style={{ fontFamily: "Inter, Arial, sans-serif", fontSize: "24px", fontWeight: 700, color: "#2f2418", margin: 0 }}>
+                Book Appointment
+              </h2>
+              <p style={{ fontFamily: "Inter, Arial, sans-serif", fontSize: "13px", color: "#6f6255", margin: "4px 0 0" }}>
+                Fill in the details below to continue.
+              </p>
+            </div>
+            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "24px", color: "#999", lineHeight: 1, padding: "4px" }} aria-label="Close booking modal">×</button>
           </div>
         </div>
 
         {submitted ? (
-          <div style={{ padding: "60px 36px", textAlign: "center" }}>
-            <div style={{ fontSize: "48px", marginBottom: "16px" }}>\u2705</div>
-            <h3 style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "24px", fontWeight: 700, color: "#3a2e1e", margin: "0 0 12px" }}>Booking Submitted!</h3>
-            <p style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "15px", color: "#777", margin: "0 0 28px", lineHeight: 1.6 }}>
-              We've received your booking for <strong>{form.serviceType}</strong>. We'll contact you shortly.
+          <div style={{ padding: "56px 32px", textAlign: "center" }}>
+            <div style={{ fontSize: "40px", marginBottom: "16px" }}>✓</div>
+            <h3 style={{ fontFamily: "Inter, Arial, sans-serif", fontSize: "22px", fontWeight: 700, color: "#2f2418", margin: "0 0 10px" }}>Booking Sent</h3>
+            <p style={{ fontFamily: "Inter, Arial, sans-serif", fontSize: "14px", color: "#666", margin: "0 0 28px", lineHeight: 1.6 }}>
+              We received your booking for <strong>{form.serviceType}</strong>. We&apos;ll review it and contact you soon.
             </p>
-            <button onClick={onClose} style={{ background: "#8B7355", color: "#fff", border: "none", borderRadius: "30px", padding: "13px 32px", fontSize: "12px", fontWeight: 700, letterSpacing: "1.5px", cursor: "pointer", fontFamily: "'Cormorant Garamond', Georgia, serif" }}>
+            <button onClick={onClose} style={{ background: "#8B7355", color: "#fff", border: "none", borderRadius: "30px", padding: "13px 32px", fontSize: "12px", fontWeight: 700, letterSpacing: "1.2px", cursor: "pointer", fontFamily: "Inter, Arial, sans-serif" }}>
               CLOSE
             </button>
           </div>
         ) : (
-          <div style={{ padding: "28px 36px 36px" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          <div style={{ padding: "24px 32px 32px" }}>
+            <div style={{ display: "grid", gap: "18px" }}>
 
               <div>
-                <label style={labelStyle}>Type of Service <span style={{ color: "#e85c2c" }}>*</span></label>
+                <label style={labelStyle}>Service <span style={{ color: "#e85c2c" }}>*</span></label>
                 <select value={form.serviceType} onChange={(e) => setForm({ ...form, serviceType: e.target.value })}
                   style={{ ...inputStyle, appearance: "none", cursor: "pointer" }}>
                   {["Standard Cleaning", "Deep Cleaning", "Reglue", "Repaint"].map((s) => (
@@ -1316,7 +1501,7 @@ function BookingModal({ service, onClose, authToken }) {
               </div>
 
               <div>
-                <label style={labelStyle}>Preferred Drop-off Date <span style={{ color: "#e85c2c" }}>*</span></label>
+                <label style={labelStyle}>Drop-off Date <span style={{ color: "#e85c2c" }}>*</span></label>
                 <input
                   type="date"
                   value={form.dropOffDate}
@@ -1326,8 +1511,8 @@ function BookingModal({ service, onClose, authToken }) {
               </div>
 
               <div>
-                <label style={labelStyle}>Complete Name <span style={{ color: "#e85c2c" }}>*</span></label>
-                <input type="text" placeholder="Enter your full name" value={form.name}
+                <label style={labelStyle}>Full Name <span style={{ color: "#e85c2c" }}>*</span></label>
+                <input type="text" placeholder="Juan Dela Cruz" value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })} style={inputStyle}
                   onFocus={(e) => (e.target.style.borderColor = "#8B7355")}
                   onBlur={(e) => (e.target.style.borderColor = "#e0dbd4")} />
@@ -1342,8 +1527,8 @@ function BookingModal({ service, onClose, authToken }) {
               </div>
 
               <div>
-                <label style={labelStyle}>Email Address <span style={{ color: "#e85c2c" }}>*</span></label>
-                <input type="email" placeholder="your.email@example.com" value={form.email}
+                <label style={labelStyle}>Email <span style={{ color: "#e85c2c" }}>*</span></label>
+                <input type="email" placeholder="you@example.com" value={form.email}
                   onChange={(e) => setForm({ ...form, email: e.target.value })} style={inputStyle}
                   onFocus={(e) => (e.target.style.borderColor = "#8B7355")}
                   onBlur={(e) => (e.target.style.borderColor = "#e0dbd4")} />
@@ -1351,7 +1536,7 @@ function BookingModal({ service, onClose, authToken }) {
 
               <div>
                 <label style={labelStyle}>Address <span style={{ color: "#e85c2c" }}>*</span></label>
-                <textarea placeholder="Enter your complete address" value={form.address}
+                <textarea placeholder="House no., street, barangay, city" value={form.address}
                   onChange={(e) => setForm({ ...form, address: e.target.value })} rows={3}
                   style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6 }}
                   onFocus={(e) => (e.target.style.borderColor = "#8B7355")}
@@ -1359,8 +1544,8 @@ function BookingModal({ service, onClose, authToken }) {
               </div>
 
               <div>
-                <label style={labelStyle}>Additional remarks</label>
-                <textarea placeholder="Any special instructions or notes..." value={form.remarks}
+                <label style={labelStyle}>Notes</label>
+                <textarea placeholder="Add instructions or concerns here..." value={form.remarks}
                   onChange={(e) => setForm({ ...form, remarks: e.target.value })} rows={3}
                   style={{ ...inputStyle, resize: "vertical", lineHeight: 1.6 }}
                   onFocus={(e) => (e.target.style.borderColor = "#8B7355")}
@@ -1368,7 +1553,7 @@ function BookingModal({ service, onClose, authToken }) {
               </div>
 
               <div>
-                <label style={labelStyle}>Upload sneaker photos <span style={{ color: "#e85c2c" }}>*</span></label>
+                <label style={labelStyle}>Shoe Photos <span style={{ color: "#e85c2c" }}>*</span></label>
                 <div
                   onClick={() => document.getElementById("sneaker-photo-input").click()}
                   onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -1389,7 +1574,7 @@ function BookingModal({ service, onClose, authToken }) {
                     Click to upload or drag and drop
                   </p>
                   <p style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "12px", color: "#aaa", margin: 0 }}>
-                    PNG, JPG - up to 3 images
+                    PNG or JPG, up to 3 photos
                   </p>
                   <input id="sneaker-photo-input" type="file" accept="image/png,image/jpeg" multiple
                     style={{ display: "none" }} onChange={(e) => handleFiles(e.target.files)} />
@@ -1411,9 +1596,9 @@ function BookingModal({ service, onClose, authToken }) {
               </div>
 
               <div>
-                <label style={labelStyle}>Payment Options <span style={{ color: "#e85c2c" }}>*</span></label>
+                <label style={labelStyle}>Payment Method <span style={{ color: "#e85c2c" }}>*</span></label>
                 <div style={{ border: "1.5px solid #e0dbd4", borderRadius: "8px", padding: "16px 20px", display: "flex", flexDirection: "column", gap: "12px", background: "#fafafa" }}>
-                  {["GCASH", "BPI", "BDO"].map((option) => (
+                  {paymentOptions.map((option) => (
                     <label key={option} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "15px", color: "#3a2e1e" }}>
                       <input type="radio" name="payment" value={option} checked={form.payment === option}
                         onChange={(e) => setForm({ ...form, payment: e.target.value })}
@@ -1424,22 +1609,92 @@ function BookingModal({ service, onClose, authToken }) {
                 </div>
               </div>
 
-              <div style={{ background: "#fff8f0", border: "1.5px solid #f0dbc8", borderRadius: "10px", padding: "20px 22px" }}>
+              {form.payment && paymentQrMeta[form.payment] && (
+                <div style={{
+                  border: `1.5px solid ${paymentQrMeta[form.payment].accent}33`,
+                  borderRadius: "10px",
+                  padding: "18px",
+                  background: "#fff",
+                }}>
+                  <div style={{ display: "flex", gap: "16px", alignItems: "center", flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      onClick={() => setQrPreview(paymentQrMeta[form.payment])}
+                      style={{
+                        width: "148px",
+                        height: "148px",
+                        borderRadius: "10px",
+                        background: "#f3f3f3",
+                        border: "1px solid #ddd",
+                        overflow: "hidden",
+                        padding: 0,
+                        cursor: "zoom-in",
+                        flexShrink: 0,
+                      }}
+                      aria-label={`Open ${form.payment} QR preview`}
+                    >
+                      <img
+                        src={paymentQrMeta[form.payment].qrSrc}
+                        alt={`${form.payment} QR code`}
+                        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                      />
+                    </button>
+                    <div style={{ flex: 1, minWidth: "220px" }}>
+                      <p style={{ margin: "0 0 8px", fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "18px", fontWeight: 700, color: "#3a2e1e" }}>
+                        {paymentQrMeta[form.payment].title}
+                      </p>
+                      <p style={{ margin: "0 0 10px", fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "14px", lineHeight: 1.6, color: "#666" }}>
+                        {paymentQrMeta[form.payment].subtitle}
+                      </p>
+                      <input
+                        id="payment-proof-input"
+                        type="file"
+                        accept="image/png,image/jpeg"
+                        style={{ display: "none" }}
+                        onChange={(e) => handlePaymentProof(e.target.files)}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => document.getElementById("payment-proof-input").click()}
+                        style={{
+                          border: "none",
+                          background: paymentQrMeta[form.payment].accent,
+                          color: "#fff",
+                          padding: "10px 14px",
+                          borderRadius: "8px",
+                          cursor: "pointer",
+                          fontFamily: "'Cormorant Garamond', Georgia, serif",
+                          fontWeight: 700,
+                        }}
+                      >
+                        Upload screenshot
+                      </button>
+                      {form.paymentProof && (
+                        <p style={{ margin: "10px 0 0", fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "13px", color: "#2f6b3a" }}>
+                          Screenshot attached: {form.paymentProof.name}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ background: "#fff8f0", border: "1.5px solid #f0dbc8", borderRadius: "10px", padding: "18px 20px" }}>
                 <p style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "14px", fontWeight: 700, color: "#c0622a", margin: "0 0 10px" }}>
-                  Important Reminders
+                  Notes
                 </p>
-                <ul style={{ margin: "0 0 12px", paddingLeft: "18px" }}>
-                  {["Bring your laces", "Bring both shoes", "Pair of shoes", "We will do our best to clean your sneakers"].map((r) => (
+                <ul style={{ margin: "0 0 10px", paddingLeft: "18px" }}>
+                  {["Bring both shoes together.", "Remove loose laces if possible.", "We will inspect the shoes before cleaning."].map((r) => (
                     <li key={r} style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "13px", color: "#c0622a", marginBottom: "4px" }}>{r}</li>
                   ))}
                 </ul>
                 <p style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "12px", color: "#c0622a", margin: 0, fontWeight: 700 }}>
-                  NOTE: <span style={{ fontWeight: 400 }}>PLEASE TAKE CLEAR PICTURES OF THE SHOES YOU'LL BE SENDING FOR OUR REFERENCE</span>
+                  Please upload clear photos of the shoes for reference.
                 </p>
               </div>
 
               <p style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "13px", color: "#888", margin: 0 }}>
-                If you need to book in other store, <span style={{ color: "#8B7355", cursor: "pointer", textDecoration: "underline" }}>click here</span>
+                Need another branch? <span style={{ color: "#8B7355", cursor: "pointer", textDecoration: "underline" }}>Click here</span>
               </p>
 
               <button
@@ -1455,7 +1710,7 @@ function BookingModal({ service, onClose, authToken }) {
                 onMouseEnter={(e) => (e.target.style.background = "#6b5a3e")}
                 onMouseLeave={(e) => (e.target.style.background = "#8B7355")}
               >
-                {submitting ? "SUBMITTING..." : "BOOK NOW"}
+                {submitting ? "SUBMITTING..." : "SUBMIT BOOKING"}
               </button>
               {submitError && (
                 <p style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "13px", color: "#c0392b", margin: 0 }}>
@@ -1467,7 +1722,8 @@ function BookingModal({ service, onClose, authToken }) {
           </div>
         )}
       </div>
-    </div>,
+    </div>
+    </>,
     document.body
   );
 }
@@ -1709,20 +1965,12 @@ function ServicesSection({ onAddToCart, canBook, onRequireLogin, authToken }) {
 
 const BRANCHES = [
   {
-    id: "megamall",
-    name: "SM Megamall",
-    address: "Lower Ground Floor, Building A, SM Megamall",
-    phone: "0905 205 5890",
-    mapSrc: "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3861.0!2d121.056!3d14.5836!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3397c90adf2e68e3%3A0x5ca30f8e6da6e4a5!2sSM%20Megamall!5e0!3m2!1sen!2sph!4v1680000000000",
-    mapsUrl: "https://maps.google.com/?q=SM+Megamall+Mandaluyong",
-  },
-  {
-    id: "trinoma",
-    name: "Trinoma Mall",
-    address: "Ground Floor, North Wing, TriNoma Mall, Quezon City",
-    phone: "0905 205 5891",
-    mapSrc: "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3860.5!2d121.0386!3d14.6565!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3397b6a6db0e7c5d%3A0x4a4a5e6b5f5f5f5f!2sTriNoma!5e0!3m2!1sen!2sph!4v1680000000001",
-    mapsUrl: "https://maps.google.com/?q=TriNoma+Mall+Quezon+City",
+    id: "cebu-store",
+    name: "Revive Sneaker Care",
+    address: "559 V Rama Ave, Cebu City, 6000 Cebu",
+    phone: "0954 159 1817",
+    mapSrc: "https://www.google.com/maps?q=559+V+Rama+Ave,+Cebu+City,+6000+Cebu&z=17&output=embed",
+    mapsUrl: "https://www.google.com/maps?q=559+V+Rama+Ave,+Cebu+City,+6000+Cebu",
   },
 ];
 
@@ -1771,69 +2019,39 @@ function BranchCard({ branch }) {
             {branch.phone}
           </span>
         </div>
-        <a
-          href={branch.mapsUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            display: "inline-flex", alignItems: "center", gap: "8px",
-            background: "#e85c2c", color: "#fff",
-            borderRadius: "30px", padding: "12px 24px",
-            fontSize: "12px", fontWeight: 700, letterSpacing: "1.5px",
-            textDecoration: "none",
-            fontFamily: "'Cormorant Garamond', Georgia, serif",
-            width: "fit-content",
-            transition: "background 0.2s",
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = "#c94a1e")}
-          onMouseLeave={(e) => (e.currentTarget.style.background = "#e85c2c")}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5">
-            <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
-          </svg>
-          GO TO LOCATION
-        </a>
         <div style={{
           borderRadius: "12px", overflow: "hidden", height: "150px",
-          background: "linear-gradient(135deg, #2a2a3a 0%, #3a3a4a 100%)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          color: "rgba(255,255,255,0.25)", fontSize: "12px", letterSpacing: "2px",
-          fontFamily: "'Cormorant Garamond', Georgia, serif",
-          marginTop: "auto",
+          background: "#ddd", marginTop: "auto",
         }}>
-          BRANCH PHOTO
+          <img
+            src={branchPhoto}
+            alt="Revive Sneaker Care storefront"
+            style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+          />
         </div>
       </div>
       <div style={{ position: "relative", background: "#e8e8e8" }}>
-        <a
-          href={branch.mapsUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            position: "absolute", top: "14px", left: "14px", zIndex: 10,
-            background: "#fff", borderRadius: "6px",
-            padding: "7px 14px", fontSize: "12px", fontWeight: 600,
-            color: "#3a2e1e", textDecoration: "none",
-            display: "flex", alignItems: "center", gap: "6px",
-            fontFamily: "'Cormorant Garamond', Georgia, serif",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-          }}
-        >
-          Open in Maps
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8B7355" strokeWidth="2.5">
-            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-            <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
-          </svg>
-        </a>
         <iframe
           src={branch.mapSrc}
           width="100%"
           height="100%"
-          style={{ border: 0, display: "block", minHeight: "380px" }}
+          style={{ border: 0, display: "block", minHeight: "380px", pointerEvents: "none" }}
           allowFullScreen=""
           loading="lazy"
           referrerPolicy="no-referrer-when-downgrade"
           title={`Map of ${branch.name}`}
+        />
+        <a
+          href={branch.mapsUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`Open ${branch.name} in Google Maps`}
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 5,
+            display: "block",
+          }}
         />
       </div>
     </div>
@@ -1847,13 +2065,13 @@ function BranchesSection() {
         <h2 style={{
           fontFamily: "'Cormorant Garamond', Georgia, serif",
           fontSize: "clamp(32px, 4vw, 52px)", fontWeight: 700, color: "#8B7355", margin: "0 0 16px",
-        }}>Our Branches</h2>
+        }}>Our Location</h2>
         <p style={{
           fontFamily: "'Cormorant Garamond', Georgia, serif",
           fontSize: "15px", color: "#777", margin: "0 auto",
           maxWidth: "500px", lineHeight: 1.7,
         }}>
-          Visit us at any of our convenient locations for professional sneaker care services
+          Visit our V. Rama store for professional sneaker care services
         </p>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: "32px", maxWidth: "1200px", margin: "0 auto" }}>
@@ -2195,6 +2413,7 @@ export default function App() {
   const [showCart, setShowCart] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
   const [showAdminOrders, setShowAdminOrders] = useState(false);
+  const [cartBookingService, setCartBookingService] = useState(null);
   const [adminModalView, setAdminModalView] = useState("orders");
   const [clientNotifications, setClientNotifications] = useState([]);
   const [clientNotificationSeenAt, setClientNotificationSeenAt] = useState(() => {
@@ -2314,6 +2533,18 @@ export default function App() {
     if (el) el.scrollIntoView({ behavior: "smooth" });
   };
 
+  const handleCartProceed = () => {
+    if (!authToken || currentUser?.role !== "CLIENT") {
+      handleBookAction();
+      return;
+    }
+    if (cart.length === 0) {
+      handleBookAction();
+      return;
+    }
+    setCartBookingService(cart[0]);
+  };
+
   return (
     <Router>
       <Routes>
@@ -2350,7 +2581,24 @@ export default function App() {
             <ReviewsSection />
             <AuthoritySection />
             <Footer />
-            {showCart && <CartSidebar cart={cart} onClose={() => setShowCart(false)} onRemove={removeFromCart} />}
+            {showCart && (
+              <CartSidebar
+                cart={cart}
+                onClose={() => setShowCart(false)}
+                onRemove={removeFromCart}
+                onProceed={() => {
+                  setShowCart(false);
+                  handleCartProceed();
+                }}
+              />
+            )}
+            {cartBookingService && (
+              <BookingModal
+                service={cartBookingService}
+                authToken={authToken}
+                onClose={() => setCartBookingService(null)}
+              />
+            )}
             {showLogin && <AuthModal onClose={() => setShowLogin(false)} onAuthSuccess={handleAuthSuccess} />}
             {showAdminOrders && authToken && currentUser?.role === "ADMIN" && (
               <AdminOrdersModal onClose={() => setShowAdminOrders(false)} token={authToken} initialView={adminModalView} />
