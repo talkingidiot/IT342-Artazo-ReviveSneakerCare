@@ -21,6 +21,8 @@ public final class DtoMapper {
                 order.getDropOffDate(),
                 order.getQuotedPrice(),
                 order.getEstimatedCompletionDate(),
+                order.getPaymentMethod(),
+                order.getPaymentProofUrl(),
                 order.getStatus(),
                 order.getCreatedAt()
         );

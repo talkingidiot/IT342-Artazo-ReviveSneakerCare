@@ -1,17 +1,20 @@
 package com.sia.demo.feature.order;
 
 import com.sia.demo.dto.OrderResponse;
+import com.sia.demo.dto.ClientOrderDecisionRequest;
 import com.sia.demo.model.User;
 import com.sia.demo.service.CurrentUserService;
 import com.sia.demo.service.OrderService;
 import com.sia.demo.service.StorageService;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.Valid;
 import java.time.LocalDate;
 import java.util.List;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -57,5 +60,21 @@ public class ClientOrderController {
     public OrderResponse orderDetail(@PathVariable Long id) {
         User user = currentUserService.getCurrentUser();
         return orderService.getOrderForClient(id, user);
+    }
+
+    @PostMapping("/{id}/decision")
+    public OrderResponse decideOnQuote(@PathVariable Long id, @Valid @RequestBody ClientOrderDecisionRequest request) {
+        User user = currentUserService.getCurrentUser();
+        return orderService.clientDecideOnQuote(id, user, request.approved());
+    }
+
+    @PostMapping(value = "/{id}/receipt", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public OrderResponse submitPaymentReceipt(
+            @PathVariable Long id,
+            @RequestPart("receipt") MultipartFile receipt,
+            @RequestParam(value = "paymentMethod", required = false) String paymentMethod
+    ) {
+        User user = currentUserService.getCurrentUser();
+        return orderService.submitPaymentReceipt(id, user, receipt, paymentMethod);
     }
 }

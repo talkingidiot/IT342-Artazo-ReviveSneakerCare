@@ -6,5 +6,6 @@ public enum OrderStatus {
     ONGOING_CLEANING,
     READY_FOR_PICKUP,
     CLAIMED,
-    COMPLETED
+    COMPLETED,
+    CANCELLED
 }

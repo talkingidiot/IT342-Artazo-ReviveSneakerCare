@@ -55,6 +55,15 @@ public class Order {
     @Column
     private LocalDate estimatedCompletionDate;
 
+    @Column
+    private Instant claimedAt;
+
+    @Column
+    private String paymentMethod;
+
+    @Column
+    private String paymentProofUrl;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private OrderStatus status;

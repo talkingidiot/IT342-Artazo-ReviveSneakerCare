@@ -17,6 +17,8 @@ public record OrderResponse(
         LocalDate dropOffDate,
         BigDecimal quotedPrice,
         LocalDate estimatedCompletionDate,
+        String paymentMethod,
+        String paymentProofUrl,
         OrderStatus status,
         Instant createdAt
 ) {

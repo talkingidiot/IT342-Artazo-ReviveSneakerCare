@@ -44,6 +44,13 @@ public class StorageService {
         return urls;
     }
 
+    public String storeImage(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(BAD_REQUEST, "Empty file");
+        }
+        return storeOne(file);
+    }
+
     private String storeOne(MultipartFile file) {
         String originalFilename = StringUtils.cleanPath(file.getOriginalFilename() == null ? "" : file.getOriginalFilename());
         String extension = "";
