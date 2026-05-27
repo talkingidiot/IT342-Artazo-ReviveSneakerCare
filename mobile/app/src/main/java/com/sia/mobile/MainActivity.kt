@@ -252,6 +252,8 @@ fun SiaApp() {
 
     if (showLogin) {
         AuthSheet(
+            apiBaseUrl = apiBaseUrl,
+            onApiBaseUrlChange = { apiBaseUrl = it },
             onClose = { showLogin = false },
             onLogin = ::login,
             onRegister = { name, email, password ->
@@ -671,7 +673,13 @@ private fun SuccessPage(onBookAnother: () -> Unit) {
 }
 
 @Composable
-private fun AuthSheet(onClose: () -> Unit, onLogin: (String, String) -> Unit, onRegister: (String, String, String) -> Unit) {
+private fun AuthSheet(
+    apiBaseUrl: String,
+    onApiBaseUrlChange: (String) -> Unit,
+    onClose: () -> Unit,
+    onLogin: (String, String) -> Unit,
+    onRegister: (String, String, String) -> Unit
+) {
     var isRegister by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
@@ -688,6 +696,14 @@ private fun AuthSheet(onClose: () -> Unit, onLogin: (String, String) -> Unit, on
             ) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(if (isRegister) "Create your account" else "Welcome back", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = ColorPalette.text)
+                    OutlinedTextField(
+                        value = apiBaseUrl,
+                        onValueChange = onApiBaseUrlChange,
+                        label = { Text("Backend URL") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Text("Use 10.0.2.2 for the emulator, or your computer IP / deployed API for a real phone.", color = ColorPalette.muted)
                     if (isRegister) OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Full name") }, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(value = email, onValueChange = { email = it }, label = { Text("Email") }, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("Password") }, modifier = Modifier.fillMaxWidth())

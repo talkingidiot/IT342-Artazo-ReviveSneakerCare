@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import { OAuth2Callback } from "./OAuth2Callback";
@@ -6,6 +6,60 @@ import { GitHubLoginButton } from "./GitHubLoginButton";
 import gcashQr from "./assets/gcash-qr.png";
 import bpiQr from "./assets/bpi-qr.png";
 import branchPhoto from "./assets/branch-photo.png";
+import standardCleaningImage from "./assets/standard-cleaning.avif";
+import deepCleaningImage from "./assets/deep-cleaning.png";
+import reglueImage from "./assets/reglue-service.png";
+import repaintImage from "./assets/repaint-service.png";
+import { ClientOrdersModal } from "./ClientOrdersModal";
+
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("App error boundary caught:", error, info);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f9f6f2", padding: "24px", textAlign: "center" }}>
+          <div style={{ maxWidth: "560px", background: "#fff", border: "1px solid #e8ddd0", borderRadius: "16px", boxShadow: "0 18px 50px rgba(0,0,0,0.12)", padding: "32px 28px" }}>
+            <h2 style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "32px", margin: "0 0 12px", color: "#3a2e1e" }}>
+              Something went wrong
+            </h2>
+            <p style={{ margin: "0 0 16px", color: "#6f5f4d", lineHeight: 1.7 }}>
+              The page hit an unexpected error while opening your orders or another client panel.
+              Please reload the page and try again.
+            </p>
+            <div style={{ display: "flex", gap: "12px", justifyContent: "center", flexWrap: "wrap" }}>
+              <button
+                onClick={() => window.location.reload()}
+                style={{ background: "#8B7355", color: "#fff", border: "none", borderRadius: "8px", padding: "12px 18px", cursor: "pointer", fontWeight: 600 }}
+              >
+                Reload page
+              </button>
+              <button
+                onClick={() => this.setState({ hasError: false, error: null })}
+                style={{ background: "#fff", color: "#8B7355", border: "1px solid #8B7355", borderRadius: "8px", padding: "12px 18px", cursor: "pointer", fontWeight: 600 }}
+              >
+                Try again
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 const NAV_LINKS = ["HOME", "SERVICES", "BRANCHES", "ABOUT US", "CONTACT US"];
 
@@ -21,15 +75,66 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:808
 const AUTH_TOKEN_KEY = "sia_auth_token";
 const AUTH_USER_KEY = "sia_auth_user";
 const CLIENT_NOTIFICATION_SEEN_AT_KEY = "sia_client_notification_seen_at";
+const HIDDEN_ADMIN_ORDER_IDS_KEY = "sia_hidden_admin_order_ids";
+
+function scrollToSection(sectionId) {
+  const el = document.getElementById(sectionId);
+  if (el) {
+    const start = window.scrollY;
+    const target = el.getBoundingClientRect().top + window.scrollY - 56;
+    const distance = target - start;
+    const duration = Math.min(900, Math.max(450, Math.abs(distance) * 0.45));
+    const startTime = performance.now();
+
+    const easeInOutCubic = (t) =>
+      t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+    const animate = (now) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = easeInOutCubic(progress);
+      window.scrollTo(0, start + distance * eased);
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        el.animate(
+          [
+            { transform: "translateY(0)", boxShadow: "0 0 0 rgba(0,0,0,0)" },
+            { transform: "translateY(-2px)", boxShadow: "0 14px 40px rgba(139,115,85,0.10)" },
+            { transform: "translateY(0)", boxShadow: "0 0 0 rgba(0,0,0,0)" },
+          ],
+          { duration: 420, easing: "ease-out" }
+        );
+      }
+    };
+
+    requestAnimationFrame(animate);
+  }
+}
 
 async function apiRequest(path, { method = "GET", body, token } = {}) {
-  const headers = { "Content-Type": "application/json" };
+  const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
+  const headers = isFormData ? {} : { "Content-Type": "application/json" };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      method,
+      headers,
+      body: body ? (isFormData ? body : JSON.stringify(body)) : undefined,
+      signal: controller.signal,
+    });
+  } catch (networkErr) {
+    if (networkErr?.name === "AbortError") {
+      throw new Error(`Request timed out while calling ${path}`);
+    }
+    throw new Error(`Network error while calling ${path}`);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
   const text = await response.text();
   let data = null;
   if (text) {
@@ -44,9 +149,22 @@ async function apiRequest(path, { method = "GET", body, token } = {}) {
       Array.isArray(data?.errors) && data.errors.length > 0
         ? data.errors.map((e) => e.defaultMessage || e.message).filter(Boolean).join(", ")
         : null;
-    throw new Error(validationMessage || data?.message || "Request failed");
+    const serverMessage = data?.message || data?.error || text;
+    throw new Error(
+      validationMessage ||
+      (serverMessage ? `${serverMessage} (HTTP ${response.status})` : `Request failed (HTTP ${response.status})`)
+    );
   }
   return data;
+}
+function resolveAssetUrl(path) {
+  if (!path) return "";
+  if (/^https?:\/\//i.test(path)) return path;
+  try {
+    return new URL(path, API_BASE_URL).toString();
+  } catch {
+    return path;
+  }
 }
 
 function CartSidebar({ cart, onClose, onRemove, onProceed }) {
@@ -65,7 +183,7 @@ function CartSidebar({ cart, onClose, onRemove, onProceed }) {
           <h2 style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "22px", fontWeight: 700, color: "#3a2e1e", margin: 0 }}>
             Your Cart {cart.length > 0 && <span style={{ fontSize: "14px", color: "#8B7355" }}>({cart.length})</span>}
           </h2>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "20px", color: "#999" }}>✕</button>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "20px", color: "#999" }}>X</button>
         </div>
 
         {/* Items */}
@@ -82,7 +200,7 @@ function CartSidebar({ cart, onClose, onRemove, onProceed }) {
                   <div style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "15px", fontWeight: 700, color: "#3a2e1e" }}>{item.name}</div>
                   <div style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "13px", color: "#8B7355" }}>{item.price}</div>
                 </div>
-                <button onClick={() => onRemove(i)} style={{ background: "none", border: "none", cursor: "pointer", color: "#ccc", fontSize: "16px" }}>✕</button>
+                <button onClick={() => onRemove(i)} style={{ background: "none", border: "none", cursor: "pointer", color: "#ccc", fontSize: "16px" }}>X</button>
               </div>
             ))
           )}
@@ -129,7 +247,7 @@ function LoginModal({ onClose }) {
       <div style={{ background: "#fff", borderRadius: "18px", width: "100%", maxWidth: "440px", boxShadow: "0 24px 80px rgba(0,0,0,0.22)" }}>
         <div style={{ padding: "32px 36px 24px", borderBottom: "1px solid #f0ebe4", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <h2 style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "26px", fontWeight: 700, color: "#3a2e1e", margin: 0 }}>Welcome Back</h2>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "20px", color: "#999" }}>✕</button>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: "20px", color: "#999" }}>X</button>
         </div>
         <div style={{ padding: "28px 36px 36px", display: "flex", flexDirection: "column", gap: "18px" }}>
           <div>
@@ -277,7 +395,18 @@ function AdminOrdersModal({ onClose, token, initialView = "orders" }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [ordersError, setOrdersError] = useState("");
   const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const [successMessage, setSuccessMessage] = useState("");
+  const [hiddenOrderIds, setHiddenOrderIds] = useState(() => {
+    try {
+      const raw = localStorage.getItem(HIDDEN_ADMIN_ORDER_IDS_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.filter((id) => Number.isFinite(Number(id))).map(Number) : [];
+    } catch {
+      return [];
+    }
+  });
   const [quoteForm, setQuoteForm] = useState({
     serviceType: "Deep Cleaning",
     quotedPrice: "",
@@ -294,36 +423,33 @@ function AdminOrdersModal({ onClose, token, initialView = "orders" }) {
 
   const loadOrders = async () => {
     try {
+      setOrdersError("");
       const data = await apiRequest("/admin/orders", { token });
-      const list = Array.isArray(data) ? data : [];
+      const list = (Array.isArray(data) ? data : []).filter(
+        (order) => !["CLAIMED", "COMPLETED", "CANCELLED"].includes(order.status) && !hiddenOrderIds.includes(order.id)
+      );
       setOrders(list);
       if (!selectedOrderId && list.length > 0) {
         setSelectedOrderId(list[0].id);
+      } else if (selectedOrderId && !list.some((order) => order.id === selectedOrderId)) {
+        setSelectedOrderId(list[0]?.id || null);
       }
     } catch (err) {
-      setError(err.message || "Failed to load admin orders");
+      setOrdersError(err.message || "Failed to load admin orders");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadOrders();
-  }, [token]);
+    localStorage.setItem(HIDDEN_ADMIN_ORDER_IDS_KEY, JSON.stringify(hiddenOrderIds));
+  }, [hiddenOrderIds]);
 
   useEffect(() => {
-    const loadMonthlySales = async () => {
-      setSalesLoading(true);
-      setSalesError("");
-      try {
-        const data = await apiRequest(`/admin/orders/sales/monthly?month=${month}`, { token });
-        setMonthlySales(data || null);
-      } catch (err) {
-        setSalesError(err.message || "Failed to load monthly sales");
-      } finally {
-        setSalesLoading(false);
-      }
-    };
+    loadOrders();
+  }, [token, hiddenOrderIds]);
+
+  useEffect(() => {
     loadMonthlySales();
   }, [token, month]);
 
@@ -336,6 +462,30 @@ function AdminOrdersModal({ onClose, token, initialView = "orders" }) {
       claimWindow: "5 - 7 days",
     });
   }, [selectedOrderId]);
+
+  const loadMonthlySales = async () => {
+    setSalesLoading(true);
+    setSalesError("");
+    try {
+      const data = await apiRequest(`/admin/orders/sales/monthly?month=${month}`, { token });
+      setMonthlySales(data || null);
+    } catch (err) {
+      setSalesError(err.message || "Failed to load monthly sales");
+    } finally {
+      setSalesLoading(false);
+    }
+  };
+
+  const bumpMonthlySalesForClaim = (order) => {
+    const orderMonth = order?.estimatedCompletionDate?.slice?.(0, 7);
+    if (!orderMonth || orderMonth !== month) return;
+    setMonthlySales((prev) => ({
+      month,
+      totalSales: Number(prev?.totalSales || 0) + Number(order?.quotedPrice || 0),
+      completedOrders: Number(prev?.completedOrders || 0) + 1,
+      unclaimedOrders: Math.max(0, Number(prev?.unclaimedOrders || 0) - 1),
+    }));
+  };
 
   const saveQuoteAndNotify = async () => {
     if (!selectedOrder) return;
@@ -390,7 +540,7 @@ function AdminOrdersModal({ onClose, token, initialView = "orders" }) {
       await apiRequest(`/orders/${selectedOrder.id}/messages`, {
         method: "POST",
         token,
-        body: { message: "Your shoes are now under cleaning process." },
+        body: { message: "Your shoes are now under cleaning process. If payment was not completed earlier, please settle it before claim." },
       });
       await loadOrders();
     } catch (err) {
@@ -406,48 +556,94 @@ function AdminOrdersModal({ onClose, token, initialView = "orders" }) {
     }
     setNoteLoading(true);
     setError("");
+    setSuccessMessage("");
     try {
-      await apiRequest(`/admin/orders/${selectedOrder.id}/status`, {
+      const updated = await apiRequest(`/admin/orders/${selectedOrder.id}/status`, {
         method: "PATCH",
         token,
         body: { status: "READY_FOR_PICKUP" },
       });
+        try {
       await apiRequest(`/orders/${selectedOrder.id}/messages`, {
         method: "POST",
         token,
-        body: { message: "Your shoes are done and ready to be claimed." },
+        body: { message: "Your shoes are ready to claim. Please review payment and settle any remaining balance before pickup." },
       });
-      await loadOrders();
-    } catch (err) {
-      setError(err.message || "Failed to mark order as ready to claim");
-    } finally {
-      setNoteLoading(false);
-    }
+      } catch (messageErr) {
+        console.warn("Notification failed after status update:", messageErr);
+      }
+      setOrders((prev) =>
+        prev
+          .map((order) =>
+            order.id === selectedOrder.id ? { ...order, ...(updated || {}), status: "READY_FOR_PICKUP" } : order
+          )
+          .filter((order) => !["CLAIMED", "COMPLETED", "CANCELLED"].includes(order.status))
+      );
+      setSelectedOrderId(selectedOrder.id);
+      setSuccessMessage(`Order #${selectedOrder.id} is now ready to claim.`);
+        await loadOrders();
+      } catch (err) {
+        setError(err.message || "Failed to mark order as ready to claim");
+      } finally {
+        setNoteLoading(false);
+      }
   };
 
   const markOrderClaimed = async () => {
-    if (!selectedOrder || selectedOrder.status !== "READY_FOR_PICKUP") {
+    if (!selectedOrder || !["ONGOING_CLEANING", "READY_FOR_PICKUP"].includes(selectedOrder.status)) {
       return;
     }
     setNoteLoading(true);
     setError("");
+    setSuccessMessage("");
     try {
-      await apiRequest(`/admin/orders/${selectedOrder.id}/status`, {
-        method: "PATCH",
-        token,
-        body: { status: "CLAIMED" },
-      });
-      await apiRequest(`/orders/${selectedOrder.id}/messages`, {
-        method: "POST",
-        token,
-        body: { message: "Your shoes have been claimed. Thank you!" },
-      });
-      await loadOrders();
-    } catch (err) {
-      setError(err.message || "Failed to mark order as claimed");
-    } finally {
-      setNoteLoading(false);
-    }
+      let updated = selectedOrder;
+      if (selectedOrder.status === "ONGOING_CLEANING") {
+        updated = await apiRequest(`/admin/orders/${selectedOrder.id}/status`, {
+          method: "PATCH",
+          token,
+          body: { status: "READY_FOR_PICKUP" },
+        });
+      }
+        updated = await apiRequest(`/admin/orders/${selectedOrder.id}/claim`, {
+          method: "POST",
+          token,
+        });
+      try {
+        await apiRequest(`/orders/${selectedOrder.id}/messages`, {
+          method: "POST",
+          token,
+          body: { message: "Your shoes have been claimed. Thank you!" },
+        });
+      } catch (messageErr) {
+        console.warn("Notification failed after claim update:", messageErr);
+      }
+      setOrders((prev) =>
+        prev
+          .map((order) =>
+            order.id === selectedOrder.id ? { ...order, ...(updated || {}), status: "CLAIMED" } : order
+          )
+          .filter((order) => !["CLAIMED", "COMPLETED", "CANCELLED"].includes(order.status))
+      );
+      setHiddenOrderIds((prev) => (prev.includes(selectedOrder.id) ? prev : [...prev, selectedOrder.id]));
+      setSelectedOrderId((prevId) => (prevId === selectedOrder.id ? null : prevId));
+      bumpMonthlySalesForClaim({ ...selectedOrder, ...(updated || {}), status: "CLAIMED" });
+      setSuccessMessage(`Order #${selectedOrder.id} was marked as claimed.`);
+      } catch (err) {
+        setHiddenOrderIds((prev) => (prev.includes(selectedOrder.id) ? prev : [...prev, selectedOrder.id]));
+        setSelectedOrderId((prevId) => (prevId === selectedOrder.id ? null : prevId));
+        bumpMonthlySalesForClaim({ ...selectedOrder, status: "CLAIMED" });
+        setOrders((prev) =>
+          prev
+            .map((order) =>
+              order.id === selectedOrder.id ? { ...order, status: "CLAIMED" } : order
+            )
+            .filter((order) => !["CLAIMED", "COMPLETED", "CANCELLED"].includes(order.status))
+        );
+        setError(err.message || "Failed to mark order as claimed");
+      } finally {
+        setNoteLoading(false);
+      }
   };
 
   return createPortal(
@@ -495,29 +691,44 @@ function AdminOrdersModal({ onClose, token, initialView = "orders" }) {
           </div>
 
           {view === "orders" && loading && <p style={{ margin: 0 }}>Loading orders...</p>}
-          {view === "orders" && error && <p style={{ margin: 0, color: "#c0392b" }}>{error}</p>}
-          {view === "orders" && !loading && !error && orders.length === 0 && <p style={{ margin: 0 }}>No orders yet.</p>}
-          {view === "orders" && !loading && !error && orders.length > 0 && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-              <div style={{ display: "grid", gap: "12px", maxHeight: "60vh", overflowY: "auto", paddingRight: "4px" }}>
-                {orders.map((order) => (
-                  <button
-                    key={order.id}
-                    onClick={() => setSelectedOrderId(order.id)}
-                    style={{
-                      border: order.id === selectedOrderId ? "2px solid #8B7355" : "1px solid #e8ddd0",
-                      borderRadius: "10px",
-                      padding: "14px 16px",
-                      background: "#fffdfb",
-                      textAlign: "left",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <div style={{ fontWeight: 700, color: "#3a2e1e" }}>Order #{order.id} - {order.status}</div>
-                    <div style={{ fontSize: "14px", color: "#6b5a3e" }}>{order.clientName} ({order.clientEmail})</div>
-                    <div style={{ fontSize: "13px", color: "#7d6a55", marginTop: "2px" }}>Drop-off: {order.dropOffDate} | Quote: {order.quotedPrice ?? "Pending"}</div>
-                  </button>
-                ))}
+            {successMessage && <p style={{ margin: 0, color: "#2d7a46" }}>{successMessage}</p>}
+            {view === "orders" && ordersError && <p style={{ margin: 0, color: "#c0392b" }}>{ordersError}</p>}
+            {view === "orders" && !loading && !ordersError && orders.length === 0 && <p style={{ margin: 0 }}>No orders yet.</p>}
+            {view === "orders" && !loading && !ordersError && orders.length > 0 && (
+            <div style={{ display: "grid", gap: "16px" }}>
+              <div style={{ border: "1px solid #e8ddd0", borderRadius: "10px", overflow: "hidden", background: "#fffdfb" }}>
+                <div style={{ maxHeight: "52vh", overflow: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ background: "#f7f2ec", textAlign: "left" }}>
+                        <th style={tableHeadCell}>Order</th>
+                        <th style={tableHeadCell}>Client</th>
+                        <th style={tableHeadCell}>Status</th>
+                        <th style={tableHeadCell}>Drop-off</th>
+                        <th style={tableHeadCell}>Quote</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {orders.map((order) => (
+                        <tr
+                          key={order.id}
+                          onClick={() => setSelectedOrderId(order.id)}
+                          style={{
+                            cursor: "pointer",
+                            background: order.id === selectedOrderId ? "#fff7ec" : "#fffdfb",
+                            borderTop: "1px solid #efe6dc",
+                          }}
+                        >
+                          <td style={tableCell}>#{order.id}</td>
+                          <td style={tableCell}>{order.clientName}<div style={{ fontSize: "12px", color: "#8b7a65" }}>{order.clientEmail}</div></td>
+                          <td style={tableCell}>{order.status}</td>
+                          <td style={tableCell}>{order.dropOffDate}</td>
+                          <td style={tableCell}>{order.quotedPrice ?? "Pending"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               <div style={{ border: "1px solid #e8ddd0", borderRadius: "10px", padding: "14px 16px", background: "#fffdfb" }}>
@@ -525,7 +736,34 @@ function AdminOrdersModal({ onClose, token, initialView = "orders" }) {
                 {selectedOrder && (
                   <>
                     <div style={{ fontWeight: 700, color: "#3a2e1e", marginBottom: "10px" }}>Respond to Order #{selectedOrder.id}</div>
+                    {Array.isArray(selectedOrder.imageUrls) && selectedOrder.imageUrls.length > 0 && (
+                      <div style={{ display: "grid", gap: "10px", marginBottom: "12px" }}>
+                        <div style={{ fontSize: "12px", fontWeight: 700, letterSpacing: "1px", color: "#7a6a57" }}>CLIENT PHOTOS</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: "10px" }}>
+                          {selectedOrder.imageUrls.map((src, idx) => (
+                            <a key={src || idx} href={resolveAssetUrl(src)} target="_blank" rel="noreferrer" style={{ display: "block", border: "1px solid #e8ddd0", borderRadius: "10px", overflow: "hidden", background: "#fff" }}>
+                              <img
+                                src={resolveAssetUrl(src)}
+                                alt={`Client upload ${idx + 1}`}
+                                style={{ width: "100%", aspectRatio: "1 / 1", objectFit: "cover", display: "block", background: "#f5f2ee" }}
+                              />
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div style={{ display: "grid", gap: "10px" }}>
+                      {["READY_FOR_PICKUP", "CLAIMED"].includes(selectedOrder.status) && selectedOrder.paymentMethod && (
+                        <div style={{ border: "1px solid #ece3d8", borderRadius: "10px", padding: "12px 14px", background: "#fffdfb" }}>
+                          <div style={{ fontSize: "12px", fontWeight: 700, letterSpacing: "1px", color: "#7a6a57", marginBottom: "6px" }}>PAYMENT</div>
+                          <div style={{ color: "#3a2e1e", fontSize: "13px", marginBottom: "4px" }}>Method: {selectedOrder.paymentMethod}</div>
+                          {selectedOrder.paymentProofUrl && (
+                            <a href={resolveAssetUrl(selectedOrder.paymentProofUrl)} target="_blank" rel="noreferrer" style={{ color: "#8B7355", fontSize: "13px" }}>
+                              View payment screenshot
+                            </a>
+                          )}
+                        </div>
+                      )}
                       <input
                         value={quoteForm.serviceType}
                         onChange={(e) => setQuoteForm((prev) => ({ ...prev, serviceType: e.target.value }))}
@@ -604,9 +842,9 @@ function AdminOrdersModal({ onClose, token, initialView = "orders" }) {
                       </button>
                       <button
                         onClick={markOrderClaimed}
-                        disabled={noteLoading || selectedOrder.status !== "READY_FOR_PICKUP"}
+                        disabled={noteLoading || !["ONGOING_CLEANING", "READY_FOR_PICKUP"].includes(selectedOrder.status)}
                         style={{
-                          background: selectedOrder.status === "READY_FOR_PICKUP" ? "#3f5d3f" : "#9aa5a0",
+                          background: ["ONGOING_CLEANING", "READY_FOR_PICKUP"].includes(selectedOrder.status) ? "#3f5d3f" : "#9aa5a0",
                           color: "#fff",
                           border: "none",
                           borderRadius: "8px",
@@ -614,10 +852,10 @@ function AdminOrdersModal({ onClose, token, initialView = "orders" }) {
                           fontSize: "12px",
                           fontWeight: 700,
                           letterSpacing: "1.2px",
-                          cursor: noteLoading || selectedOrder.status !== "READY_FOR_PICKUP" ? "not-allowed" : "pointer",
+                          cursor: noteLoading || !["ONGOING_CLEANING", "READY_FOR_PICKUP"].includes(selectedOrder.status) ? "not-allowed" : "pointer",
                           opacity: noteLoading ? 0.7 : 1,
                         }}
-                        title={selectedOrder.status !== "READY_FOR_PICKUP" ? "Order must be READY_FOR_PICKUP first" : "Mark this order as claimed"}
+                        title={!["ONGOING_CLEANING", "READY_FOR_PICKUP"].includes(selectedOrder.status) ? "Order must be ongoing or ready for pickup" : "Mark this order as claimed"}
                       >
                         {noteLoading ? "UPDATING..." : "MARK AS CLAIMED"}
                       </button>
@@ -628,21 +866,21 @@ function AdminOrdersModal({ onClose, token, initialView = "orders" }) {
             </div>
           )}
 
-          {view === "sales" && (
-            <div>
-              <label style={{ display: "block", marginBottom: "8px", fontSize: "13px", color: "#6b5a3e", fontWeight: 700 }}>
-                Select Month
-              </label>
+            {view === "sales" && (
+              <div>
+                <label style={{ display: "block", marginBottom: "8px", fontSize: "13px", color: "#6b5a3e", fontWeight: 700 }}>
+                  Select Month
+                </label>
               <input
                 type="month"
                 value={month}
                 onChange={(e) => setMonth(e.target.value)}
                 style={{ padding: "10px", borderRadius: "8px", border: "1px solid #d9d1c7", marginBottom: "16px" }}
               />
-              {salesLoading && <p style={{ margin: 0 }}>Loading monthly sales...</p>}
-              {salesError && <p style={{ margin: 0, color: "#c0392b" }}>{salesError}</p>}
-              {!salesLoading && !salesError && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                {salesLoading && <p style={{ margin: 0 }}>Loading monthly sales...</p>}
+                {salesError && <p style={{ margin: 0, color: "#c0392b" }}>{salesError}</p>}
+                {!salesLoading && !salesError && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
                   <div style={{ background: "#f9f4ee", borderRadius: "10px", padding: "16px" }}>
                     <div style={{ fontSize: "12px", color: "#7b6b58", marginBottom: "6px" }}>TOTAL SALES</div>
                     <div style={{ fontSize: "28px", color: "#3a2e1e", fontWeight: 700 }}>
@@ -655,16 +893,16 @@ function AdminOrdersModal({ onClose, token, initialView = "orders" }) {
                       {monthlySales?.completedOrders ?? 0}
                     </div>
                   </div>
-                  <div style={{ background: "#f9f4ee", borderRadius: "10px", padding: "16px" }}>
-                    <div style={{ fontSize: "12px", color: "#7b6b58", marginBottom: "6px" }}>UNCLAIMED SHOES</div>
-                    <div style={{ fontSize: "28px", color: "#3a2e1e", fontWeight: 700 }}>
-                      {monthlySales?.unclaimedOrders ?? 0}
+                    <div style={{ background: "#f9f4ee", borderRadius: "10px", padding: "16px" }}>
+                      <div style={{ fontSize: "12px", color: "#7b6b58", marginBottom: "6px" }}>UNCLAIMED SHOES</div>
+                      <div style={{ fontSize: "28px", color: "#3a2e1e", fontWeight: 700 }}>
+                        {monthlySales?.unclaimedOrders ?? 0}
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            )}
         </div>
       </div>
     </div>,
@@ -672,12 +910,30 @@ function AdminOrdersModal({ onClose, token, initialView = "orders" }) {
   );
 }
 
+const tableHeadCell = {
+  padding: "12px 14px",
+  fontSize: "12px",
+  letterSpacing: "1px",
+  color: "#7a6a57",
+  textTransform: "uppercase",
+  borderBottom: "1px solid #efe6dc",
+};
+
+const tableCell = {
+  padding: "12px 14px",
+  fontSize: "13px",
+  color: "#3a2e1e",
+  borderBottom: "1px solid #f2ebe4",
+  verticalAlign: "top",
+};
+
 function Navbar({
   cartCount,
   onCartOpen,
   onLoginOpen,
   currentUser,
   onLogout,
+  onOpenClientOrders,
   onOpenAdminOrders,
   onOpenAdminSales,
   clientNotifications = [],
@@ -694,11 +950,6 @@ function Navbar({
     window.addEventListener("scroll", onScroll);
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
-
-  const scrollTo = (sectionId) => {
-    const el = document.getElementById(sectionId);
-    if (el) el.scrollIntoView({ behavior: "smooth" });
-  };
 
   useEffect(() => {
     const onClickOutside = (event) => {
@@ -742,7 +993,7 @@ function Navbar({
       {/* Logo */}
       <div
         style={{ cursor: "pointer" }}
-        onClick={() => scrollTo("section-home")}
+        onClick={() => scrollToSection("section-home")}
       >
         <div style={{
           border: "1.5px solid #8B7355", padding: "4px 10px",
@@ -758,10 +1009,10 @@ function Navbar({
       <ul style={{ display: "flex", gap: "36px", listStyle: "none", margin: 0, padding: 0 }}>
         {NAV_LINKS.map((link) => (
           <li key={link}>
-            <a
-              href="#"
-              onClick={(e) => { e.preventDefault(); scrollTo(SECTION_IDS[link]); }}
-              style={{
+              <a
+                href="#"
+                onClick={(e) => { e.preventDefault(); scrollToSection(SECTION_IDS[link]); }}
+                style={{
                 textDecoration: "none", fontSize: "12px", fontWeight: 600,
                 letterSpacing: "1.5px", color: "#3a2e1e",
                 fontFamily: "'Cormorant Garamond', Georgia, serif", transition: "color 0.2s",
@@ -878,13 +1129,22 @@ function Navbar({
                   )}
                 </div>
 
-                {currentUser.role === "CLIENT" && (
-                  <>
-                    <button
-                      onClick={() => {
-                        setShowProfileMenu(false);
-                        onCartOpen();
-                      }}
+                  {currentUser.role === "CLIENT" && (
+                    <>
+                      <button
+                        onClick={() => {
+                          setShowProfileMenu(false);
+                          onOpenClientOrders();
+                        }}
+                        style={{ width: "100%", textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: "11px 14px", fontSize: "13px", color: "#3a2e1e" }}
+                      >
+                        My Orders
+                      </button>
+                      <button
+                        onClick={() => {
+                          setShowProfileMenu(false);
+                          onCartOpen();
+                        }}
                       style={{ width: "100%", textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: "11px 14px", fontSize: "13px", color: "#3a2e1e" }}
                     >
                       Cart {cartCount > 0 ? `(${cartCount})` : ""}
@@ -1212,8 +1472,7 @@ const SERVICES = [
     description: "Basic cleaning service to refresh your sneakers. Includes surface cleaning, dirt removal, and basic stain treatment.",
     features: ["Surface cleaning", "Dirt & dust removal", "Basic stain treatment", "Lace cleaning"],
     price: "₱400",
-    imageBg: "linear-gradient(135deg, #c9b99a 0%, #a08060 100%)",
-    imageLabel: "SERVICE IMAGE",
+    imageSrc: standardCleaningImage,
   },
   {
     id: "deep",
@@ -1222,8 +1481,7 @@ const SERVICES = [
     description: "Comprehensive deep cleaning for heavily soiled sneakers. Includes intensive stain removal and complete restoration.",
     features: ["Intensive cleaning", "Deep stain removal", "Sole whitening", "Interior cleaning", "Deodorizing"],
     price: "₱600",
-    imageBg: "linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%)",
-    imageLabel: "SERVICE IMAGE",
+    imageSrc: repaintImage,
     dark: true,
   },
   {
@@ -1233,8 +1491,7 @@ const SERVICES = [
     description: "Reglue starts at ₱400. Final pricing depends on the admin's comment or reply after inspection.",
     features: ["Sole reattachment", "Structural repair", "Admin review required", "Price may vary"],
     price: "Starts at ₱400",
-    imageBg: "linear-gradient(135deg, #8a6a4a 0%, #5a3a1a 100%)",
-    imageLabel: "SERVICE IMAGE",
+    imageSrc: reglueImage,
   },
   {
     id: "repaint",
@@ -1243,23 +1500,19 @@ const SERVICES = [
     description: "Professional color restoration and custom painting. Bring faded colors back to life or customize your sneakers.",
     features: ["Color restoration", "Custom painting", "Premium paint", "Protective finish", "Color matching"],
     price: "₱400",
-    imageBg: "linear-gradient(135deg, #e8e8e8 0%, #c0c0c0 100%)",
-    imageLabel: "SERVICE IMAGE",
+    imageSrc: deepCleaningImage,
   },
 ];
 
 function BookingModal({ service, onClose, authToken }) {
   const [form, setForm] = useState({
-    serviceType: service ? service.name : "Standard Cleaning",
     dropOffDate: "",
     name: "",
     contact: "",
     email: "",
     address: "",
     remarks: "",
-    payment: "",
     photos: [],
-    paymentProof: null,
   });
   const [submitted, setSubmitted] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -1270,13 +1523,13 @@ function BookingModal({ service, onClose, authToken }) {
   const paymentQrMeta = {
     GCASH: {
       title: "GCash QR",
-      subtitle: "Scan to pay, then upload the screenshot below.",
+      subtitle: "Scan to pay when the order is ready for pickup.",
       accent: "#2ABF88",
       qrSrc: gcashQr,
     },
     BPI: {
       title: "BPI QR",
-      subtitle: "Scan to pay, then upload the screenshot below.",
+      subtitle: "Scan to pay when the order is ready for pickup.",
       accent: "#0B57D0",
       qrSrc: bpiQr,
     },
@@ -1311,17 +1564,6 @@ function BookingModal({ service, onClose, authToken }) {
     setForm(prev => ({ ...prev, photos: [...prev.photos, ...valid].slice(0, 3) }));
   };
 
-  const handlePaymentProof = (fileList) => {
-    const file = fileList?.[0];
-    if (!file) return;
-    if (!file.type.match(/image\/(png|jpeg)/)) {
-      setSubmitError("Upload a PNG or JPG payment screenshot.");
-      return;
-    }
-    setSubmitError("");
-    setForm((prev) => ({ ...prev, paymentProof: file }));
-  };
-
   const handleSubmit = async () => {
     if (!authToken) {
       setSubmitError("Please log in to continue.");
@@ -1335,24 +1577,14 @@ function BookingModal({ service, onClose, authToken }) {
       setSubmitError("Upload 1 to 3 shoe photos.");
       return;
     }
-    if (!form.payment) {
-      setSubmitError("Please select a payment method.");
-      return;
-    }
-    if (!form.paymentProof) {
-      setSubmitError("Please upload your payment screenshot.");
-      return;
-    }
 
     setSubmitting(true);
     setSubmitError("");
     try {
       const payload = new FormData();
       payload.append("dropOffDate", form.dropOffDate);
-      payload.append("shoeType", form.serviceType);
+      payload.append("shoeType", service?.name || "Standard Cleaning");
       form.photos.forEach((photo) => payload.append("images", photo));
-      payload.append("paymentMethod", form.payment);
-      payload.append("paymentProof", form.paymentProof);
 
       const response = await fetch(`${API_BASE_URL}/client/orders`, {
         method: "POST",
@@ -1480,7 +1712,7 @@ function BookingModal({ service, onClose, authToken }) {
             <div style={{ fontSize: "40px", marginBottom: "16px" }}>✓</div>
             <h3 style={{ fontFamily: "Inter, Arial, sans-serif", fontSize: "22px", fontWeight: 700, color: "#2f2418", margin: "0 0 10px" }}>Booking Sent</h3>
             <p style={{ fontFamily: "Inter, Arial, sans-serif", fontSize: "14px", color: "#666", margin: "0 0 28px", lineHeight: 1.6 }}>
-              We received your booking for <strong>{form.serviceType}</strong>. We&apos;ll review it and contact you soon.
+              We received your booking for <strong>{service?.name || "Standard Cleaning"}</strong>. We&apos;ll review it and contact you soon.
             </p>
             <button onClick={onClose} style={{ background: "#8B7355", color: "#fff", border: "none", borderRadius: "30px", padding: "13px 32px", fontSize: "12px", fontWeight: 700, letterSpacing: "1.2px", cursor: "pointer", fontFamily: "Inter, Arial, sans-serif" }}>
               CLOSE
@@ -1489,15 +1721,11 @@ function BookingModal({ service, onClose, authToken }) {
         ) : (
           <div style={{ padding: "24px 32px 32px" }}>
             <div style={{ display: "grid", gap: "18px" }}>
-
-              <div>
-                <label style={labelStyle}>Service <span style={{ color: "#e85c2c" }}>*</span></label>
-                <select value={form.serviceType} onChange={(e) => setForm({ ...form, serviceType: e.target.value })}
-                  style={{ ...inputStyle, appearance: "none", cursor: "pointer" }}>
-                  {["Standard Cleaning", "Deep Cleaning", "Reglue", "Repaint"].map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
+              <div style={{ border: "1px solid #ece3d8", borderRadius: "10px", padding: "12px 14px", background: "#fffdfb" }}>
+                <div style={{ fontSize: "12px", fontWeight: 700, letterSpacing: "1px", color: "#7a6a57", marginBottom: "6px" }}>SERVICE</div>
+                <div style={{ color: "#3a2e1e", fontSize: "14px", fontWeight: 600 }}>
+                  {service?.name || "Standard Cleaning"}
+                </div>
               </div>
 
               <div>
@@ -1595,90 +1823,6 @@ function BookingModal({ service, onClose, authToken }) {
                 )}
               </div>
 
-              <div>
-                <label style={labelStyle}>Payment Method <span style={{ color: "#e85c2c" }}>*</span></label>
-                <div style={{ border: "1.5px solid #e0dbd4", borderRadius: "8px", padding: "16px 20px", display: "flex", flexDirection: "column", gap: "12px", background: "#fafafa" }}>
-                  {paymentOptions.map((option) => (
-                    <label key={option} style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "15px", color: "#3a2e1e" }}>
-                      <input type="radio" name="payment" value={option} checked={form.payment === option}
-                        onChange={(e) => setForm({ ...form, payment: e.target.value })}
-                        style={{ accentColor: "#8B7355", width: "16px", height: "16px", cursor: "pointer" }} />
-                      {option}
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              {form.payment && paymentQrMeta[form.payment] && (
-                <div style={{
-                  border: `1.5px solid ${paymentQrMeta[form.payment].accent}33`,
-                  borderRadius: "10px",
-                  padding: "18px",
-                  background: "#fff",
-                }}>
-                  <div style={{ display: "flex", gap: "16px", alignItems: "center", flexWrap: "wrap" }}>
-                    <button
-                      type="button"
-                      onClick={() => setQrPreview(paymentQrMeta[form.payment])}
-                      style={{
-                        width: "148px",
-                        height: "148px",
-                        borderRadius: "10px",
-                        background: "#f3f3f3",
-                        border: "1px solid #ddd",
-                        overflow: "hidden",
-                        padding: 0,
-                        cursor: "zoom-in",
-                        flexShrink: 0,
-                      }}
-                      aria-label={`Open ${form.payment} QR preview`}
-                    >
-                      <img
-                        src={paymentQrMeta[form.payment].qrSrc}
-                        alt={`${form.payment} QR code`}
-                        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-                      />
-                    </button>
-                    <div style={{ flex: 1, minWidth: "220px" }}>
-                      <p style={{ margin: "0 0 8px", fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "18px", fontWeight: 700, color: "#3a2e1e" }}>
-                        {paymentQrMeta[form.payment].title}
-                      </p>
-                      <p style={{ margin: "0 0 10px", fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "14px", lineHeight: 1.6, color: "#666" }}>
-                        {paymentQrMeta[form.payment].subtitle}
-                      </p>
-                      <input
-                        id="payment-proof-input"
-                        type="file"
-                        accept="image/png,image/jpeg"
-                        style={{ display: "none" }}
-                        onChange={(e) => handlePaymentProof(e.target.files)}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => document.getElementById("payment-proof-input").click()}
-                        style={{
-                          border: "none",
-                          background: paymentQrMeta[form.payment].accent,
-                          color: "#fff",
-                          padding: "10px 14px",
-                          borderRadius: "8px",
-                          cursor: "pointer",
-                          fontFamily: "'Cormorant Garamond', Georgia, serif",
-                          fontWeight: 700,
-                        }}
-                      >
-                        Upload screenshot
-                      </button>
-                      {form.paymentProof && (
-                        <p style={{ margin: "10px 0 0", fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "13px", color: "#2f6b3a" }}>
-                          Screenshot attached: {form.paymentProof.name}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
               <div style={{ background: "#fff8f0", border: "1.5px solid #f0dbc8", borderRadius: "10px", padding: "18px 20px" }}>
                 <p style={{ fontFamily: "'Cormorant Garamond', Georgia, serif", fontSize: "14px", fontWeight: 700, color: "#c0622a", margin: "0 0 10px" }}>
                   Notes
@@ -1752,20 +1896,30 @@ function ServiceCard({ service, onAddToCart, canBook, onRequireLogin, authToken 
       <div
         style={{
           height: "200px",
-          background: service.imageBg,
+          background: service.imageSrc ? "#f4eee6" : service.imageBg,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          color: service.dark ? "rgba(100,210,190,0.4)" : "rgba(255,255,255,0.35)",
-          fontSize: "13px",
-          letterSpacing: "2px",
-          fontFamily: "'Cormorant Garamond', Georgia, serif",
           position: "relative",
           overflow: "hidden",
         }}
       >
-        {/* Replace with: <img src="YOUR_IMAGE" alt={service.name} style={{width:'100%',height:'100%',objectFit:'cover'}} /> */}
-        {service.imageLabel}
+        {service.imageSrc ? (
+          <img
+            src={service.imageSrc}
+            alt={service.name}
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              display: "block",
+            }}
+          />
+        ) : (
+          <>
+            {service.imageLabel}
+          </>
+        )}
         {service.dark && (
           <div style={{
             position: "absolute",
@@ -2334,8 +2488,13 @@ function Footer() {
             fontSize: "12px", fontWeight: 700, letterSpacing: "2px",
             color: "#8B7355", margin: "0 0 20px", textTransform: "uppercase",
           }}>Quick Links</h4>
-          {["Home", "Services", "Branches", "About Us"].map((l) => (
-            <a key={l} href="#" style={{
+          {[
+            ["Home", "section-home"],
+            ["Services", "section-services"],
+            ["Branches", "section-branches"],
+            ["About Us", "section-about"],
+          ].map(([label, sectionId]) => (
+            <a key={label} href="#" onClick={(e) => { e.preventDefault(); scrollToSection(sectionId); }} style={{
               display: "block", fontFamily: "'Cormorant Garamond', Georgia, serif",
               fontSize: "14px", color: "rgba(255,255,255,0.55)",
               textDecoration: "none", marginBottom: "10px",
@@ -2343,7 +2502,7 @@ function Footer() {
             }}
               onMouseEnter={(e) => (e.target.style.color = "#8B7355")}
               onMouseLeave={(e) => (e.target.style.color = "rgba(255,255,255,0.55)")}
-            >{l}</a>
+            >{label}</a>
           ))}
         </div>
 
@@ -2413,6 +2572,7 @@ export default function App() {
   const [showCart, setShowCart] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
   const [showAdminOrders, setShowAdminOrders] = useState(false);
+  const [showClientOrders, setShowClientOrders] = useState(false);
   const [cartBookingService, setCartBookingService] = useState(null);
   const [adminModalView, setAdminModalView] = useState("orders");
   const [clientNotifications, setClientNotifications] = useState([]);
@@ -2546,66 +2706,81 @@ export default function App() {
   };
 
   return (
-    <Router>
-      <Routes>
-        <Route path="/oauth/callback" element={<OAuth2Callback />} />
-        <Route path="/" element={
-          <div style={{ margin: 0, padding: 0, boxSizing: "border-box" }}>
-            <Navbar
-              cartCount={cart.length}
-              onCartOpen={() => setShowCart(true)}
-              onLoginOpen={() => setShowLogin(true)}
-              currentUser={currentUser}
-              onLogout={handleLogout}
-              onOpenAdminOrders={() => {
-                setAdminModalView("orders");
-                setShowAdminOrders(true);
-              }}
-              onOpenAdminSales={() => {
-                setAdminModalView("sales");
-                setShowAdminOrders(true);
-              }}
-              clientNotifications={clientNotifications}
-              unreadNotificationCount={unreadNotificationCount}
-              onOpenNotifications={handleOpenNotifications}
-            />
-            <Hero onBookAction={handleBookAction} />
-            <AboutSection />
-            <ServicesSection
-              onAddToCart={addToCart}
-              canBook={isClientLoggedIn}
-              onRequireLogin={handleBookAction}
-              authToken={authToken}
-            />
-            <BranchesSection />
-            <ReviewsSection />
-            <AuthoritySection />
-            <Footer />
-            {showCart && (
-              <CartSidebar
-                cart={cart}
-                onClose={() => setShowCart(false)}
-                onRemove={removeFromCart}
-                onProceed={() => {
-                  setShowCart(false);
-                  handleCartProceed();
+    <AppErrorBoundary>
+      <Router>
+        <Routes>
+          <Route path="/oauth/callback" element={<OAuth2Callback />} />
+          <Route path="/" element={
+            <div style={{ margin: 0, padding: 0, boxSizing: "border-box" }}>
+              <Navbar
+                cartCount={cart.length}
+                onCartOpen={() => setShowCart(true)}
+                onLoginOpen={() => setShowLogin(true)}
+                currentUser={currentUser}
+                onLogout={handleLogout}
+                onOpenClientOrders={() => setShowClientOrders(true)}
+                onOpenAdminOrders={() => {
+                  setAdminModalView("orders");
+                  setShowAdminOrders(true);
                 }}
+                onOpenAdminSales={() => {
+                  setAdminModalView("sales");
+                  setShowAdminOrders(true);
+                }}
+                clientNotifications={clientNotifications}
+                unreadNotificationCount={unreadNotificationCount}
+                onOpenNotifications={handleOpenNotifications}
               />
-            )}
-            {cartBookingService && (
-              <BookingModal
-                service={cartBookingService}
+              <Hero onBookAction={handleBookAction} />
+              <AboutSection />
+              <ServicesSection
+                onAddToCart={addToCart}
+                canBook={isClientLoggedIn}
+                onRequireLogin={handleBookAction}
                 authToken={authToken}
-                onClose={() => setCartBookingService(null)}
               />
-            )}
-            {showLogin && <AuthModal onClose={() => setShowLogin(false)} onAuthSuccess={handleAuthSuccess} />}
-            {showAdminOrders && authToken && currentUser?.role === "ADMIN" && (
-              <AdminOrdersModal onClose={() => setShowAdminOrders(false)} token={authToken} initialView={adminModalView} />
-            )}
-          </div>
-        } />
-      </Routes>
-    </Router>
+              <BranchesSection />
+              <ReviewsSection />
+              <AuthoritySection />
+              <Footer />
+              {showCart && (
+                <CartSidebar
+                  cart={cart}
+                  onClose={() => setShowCart(false)}
+                  onRemove={removeFromCart}
+                  onProceed={() => {
+                    setShowCart(false);
+                    handleCartProceed();
+                  }}
+                />
+              )}
+              {cartBookingService && (
+                <BookingModal
+                  service={cartBookingService}
+                  authToken={authToken}
+                  onClose={() => setCartBookingService(null)}
+                />
+              )}
+              {showLogin && <AuthModal onClose={() => setShowLogin(false)} onAuthSuccess={handleAuthSuccess} />}
+              {showClientOrders && authToken && currentUser?.role === "CLIENT" && (
+                <ClientOrdersModal
+                  onClose={() => setShowClientOrders(false)}
+                  token={authToken}
+                  apiRequest={apiRequest}
+                  resolveAssetUrl={resolveAssetUrl}
+                />
+              )}
+              {showAdminOrders && authToken && currentUser?.role === "ADMIN" && (
+                <AdminOrdersModal
+                  onClose={() => setShowAdminOrders(false)}
+                  token={authToken}
+                  initialView={adminModalView}
+                />
+              )}
+            </div>
+          } />
+        </Routes>
+      </Router>
+    </AppErrorBoundary>
   );
 }

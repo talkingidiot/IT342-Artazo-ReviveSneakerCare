@@ -4,7 +4,7 @@
 - Project Name: Revive Sneaker Care
 - Branch: `refactor-vertical-slice-testing`
 - Platforms: Backend, Web Frontend, Mobile Application
-- Test Date: 2026-05-07
+- Test Date: 2026-05-09
 
 ## Refactoring Summary
 - Cleaned the booking UI copy and form layout for readability.
@@ -23,6 +23,13 @@ See `docs/Software_Test_Plan.md`.
 - Backend test run: `mvnw.cmd test`
 - Frontend build run: `npm run build`
 - Mobile build run: `gradlew.bat :app:assembleDebug`
+
+Insert screenshots here:
+- Screenshot 1: Backend test log showing `BUILD SUCCESS`
+- Screenshot 2: Frontend build log showing Vite build success
+- Screenshot 3: Mobile build log showing `BUILD SUCCESSFUL`
+- Screenshot 4: Website booking flow screenshot
+- Screenshot 5: Mobile app home/booking screen screenshot
 
 ## Regression Test Results
 | Area | Result | Notes |
